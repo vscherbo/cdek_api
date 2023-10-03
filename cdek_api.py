@@ -30,7 +30,7 @@ class CdekAPI():
     _url_client_id = '%s/v2/oauth/token'
     _url_orders = '%s/v2/orders'
     _url_webhooks = '%s/v2/webhooks'
-    _url_regions = '%s/v2/location/regions'
+    url_regions = '%s/v2/location/regions'
     headers = {'Content-type': 'application/json'}
 
     #def __init__(self, client_id=None, client_secret=None, api_url=HOST):
@@ -41,7 +41,7 @@ class CdekAPI():
                                                DT_FORMAT)
 
         self.api_url = config['CDEK']['api_url']
-        self.payload = {}
+        #self.payload = {}
         self.text = ''
         #self.status_code = 200
         self.err_msg = None
@@ -64,13 +64,13 @@ class CdekAPI():
         """ Authentication
         """
 
-        self.payload = {'grant_type': 'client_credentials',
-                        'client_id': client_id,
-                        'client_secret': client_secret}
-        logging.debug('payload=%s', self.payload)
+        payload = {'grant_type': 'client_credentials',
+                   'client_id': client_id,
+                   'client_secret': client_secret}
+        logging.debug('payload=%s', payload)
         #self.headers = {'Content-type': 'x-www-form-urlencoded'}
         resp = requests.post(self._url_client_id % self.api_url,
-                             params=self.payload,
+                             params=payload,
                              headers={"Content-type": "x-www-form-urlencoded"})
         ret = resp.json()
         loc_res = False
@@ -102,7 +102,7 @@ class CdekAPI():
         return f'{tag} msg={str(exception)}'
         #return 'f{tag} msg=f{str(exception).encode("utf-8")}'
 
-    def cdek_req(self, _url, method='POST'):
+    def cdek_req(self, _url, payload, method='POST'):
         """ DO an request to api.cdek.ru
             Args:
                 _url - URL on api.cdek.ru
@@ -125,13 +125,13 @@ class CdekAPI():
         logging.debug('headers=%s', self.headers)
         try:
             resp = loc_method(_url % self.api_url,
-                              params=self.payload,
+                              params=payload,
                               headers=self.headers)
             status_code = resp.status_code
             logging.debug("resp.url=%s", resp.url)
             self.err_msg = None
             logging.debug("status_code=%s", resp.status_code)
-            self.payload.clear()
+            #self.payload.clear()
             resp.raise_for_status()
         except requests.exceptions.Timeout as exc:
             # Maybe set up for a retry, or continue in a retry loop
@@ -169,8 +169,8 @@ class CdekAPI():
     def cdek_create_order(self, **kwargs):
         """ Create an order
         """
-        self.payload["docIds"] = kwargs
-        return self.cdek_req(self._url_orders)
+        payload = {"docIds": kwargs}
+        return self.cdek_req(self._url_orders, payload)
 
     def cdek_order(self, uuid):
         """ Order info
@@ -181,24 +181,16 @@ class CdekAPI():
     def cdek_webhook_reg(self, arg_url, arg_type):
         """ Webhook subscription
         """
-        self.payload['url'] = arg_url
-        self.payload['type'] = arg_type
-        return self.cdek_req(self._url_webhooks)
+        payload = {}
+        payload['url'] = arg_url
+        payload['type'] = arg_type
+        return self.cdek_req(self._url_webhooks, payload)
 
     def cdek_webhook_list(self):
         """ Webhook subscription info
         """
         return self.cdek_req(self._url_webhooks, 'GET')
 
-    def cdek_regions(self, page=0, size=10):
-        """ Метод предназначен для получения детальной информации о регионах
-        """
-        if page > 0:
-            self.payload['country_codes'] = 'ES'
-            self.payload['page'] = page
-            self.payload['size'] = size
-
-        return self.cdek_req(self._url_regions, 'GET')
 
 class CDEKApp(PGapp, log_app.LogApp):
     """ An CDEK app
@@ -217,6 +209,16 @@ class CDEKApp(PGapp, log_app.LogApp):
             with open(config_filename, 'w', encoding='utf-8') as cfgfile:
                 self.config.write(cfgfile)
 
+    def cdek_regions(self, page=0, size=10):
+        """ Метод предназначен для получения детальной информации о регионах
+        """
+        payload = {}
+        if page > 0:
+            payload['country_codes'] = 'ES'
+            payload['page'] = page
+            payload['size'] = size
+
+        return self.api.cdek_req(self.api.url_regions, payload, 'GET')
 
 if __name__ == '__main__':
     LOG_FORMAT = '[%(filename)-21s:%(lineno)4s - %(funcName)20s()] \
@@ -227,7 +229,6 @@ if __name__ == '__main__':
     CDEK = CDEKApp(args=ARGS)
     if CDEK:
         logging.debug('CDEK.text=%s', CDEK.api.text)
-        CDEK.api.payload.clear()
         #CDEK_RES = CDEK.cdek_webhook_reg('http://dru.kipspb.ru:8123', 'ORDER_STATUS')
         # Webhooks info
         #CDEK_RES = CDEK.api.cdek_webhook_list()
@@ -236,7 +237,7 @@ if __name__ == '__main__':
         # CDEK_RES = CDEK.cdek_order('72753034-6edc-41d1-8abf-ab03d80fb89b')
 
         # regions
-        CDEK_RES = CDEK.api.cdek_regions(page=2, size=3)
+        CDEK_RES = CDEK.cdek_regions(page=2, size=3)
 
         logging.debug('CDEK_RES=%s', json.dumps(CDEK_RES, ensure_ascii=False, indent=4))
 
