@@ -4,7 +4,7 @@
 Base class for api.cdek.ru
 """
 import os
-import sys
+#import sys
 from datetime import datetime
 from datetime import timedelta
 import logging
@@ -19,8 +19,6 @@ import log_app
 DT_FORMAT = '"%d.%m.%Y %H:%M:%S"'
 TS_FORMAT = '%Y%m%d_%H%M%S'
 
-#HOST = "https://api.cdek.ru"
-
 class CdekAPI():
     """
     Base class for api.cdek.ru
@@ -30,6 +28,7 @@ class CdekAPI():
     _url_client_id = '%s/v2/oauth/token'
     _url_orders = '%s/v2/orders'
     _url_webhooks = '%s/v2/webhooks'
+    _url_print_barcodes = '%s/v2/print_barcodes'
     url_regions = '%s/v2/location/regions'
     headers = {'Content-type': 'application/json'}
 
@@ -125,7 +124,8 @@ class CdekAPI():
         logging.debug('headers=%s', self.headers)
         try:
             resp = loc_method(_url % self.api_url,
-                              params=payload,
+                              params=payload,  # Ok for GET regions
+                              json=payload,
                               headers=self.headers)
             status_code = resp.status_code
             logging.debug("resp.url=%s", resp.url)
@@ -166,17 +166,16 @@ class CdekAPI():
 
         return ret
 
-    def cdek_create_order(self, **kwargs):
+    #def cdek_create_order(self, **kwargs):
+    def cdek_create_order(self, payload):
         """ Create an order
         """
-        payload = {"docIds": kwargs}
         return self.cdek_req(self._url_orders, payload)
 
-    def cdek_order(self, uuid):
+    def cdek_order_uuid(self, uuid):
         """ Order info
         """
-        #return self.cdek_get('{}/{}'.format(self._url_orders, uuid))
-        return self.cdek_req(f'{self._url_orders}/{uuid}', 'GET')
+        return self.cdek_req(f'{self._url_orders}/{uuid}', None, method='GET')
 
     def cdek_webhook_reg(self, arg_url, arg_type):
         """ Webhook subscription
@@ -191,6 +190,83 @@ class CdekAPI():
         """
         return self.cdek_req(self._url_webhooks, 'GET')
 
+##################################################################
+#
+#
+# comment M means "mandatory"
+DEMO_PAYLOAD = {
+    "type": 1,  # интернет-магазин
+    # "tariff_code": 482,  # для type:2 - 482: С-Д, 483: С-С
+    "tariff_code": 137,  # для type:1 - 137: С-Д, 136: С-С
+    "comment": "Новый заказ",
+    "number": 123,  # shp_id
+    "shipment_point": "SPB9",
+    "sender": {
+        "company": "Компания",
+        "name": "Петров Петр",  # M
+        "email": "msk@cdek.ru",
+        "phones": [  # M
+            {
+                "number": "+79134000101"
+            }
+        ]
+    },
+    "recipient": {
+        "company": "Иванов Иван",
+        "name": "Иванов Иван",  # M
+        "passport_series": "5008",
+        "passport_number": "345123",
+        "passport_date_of_issue": "2019-03-12",
+        "passport_organization": "ОВД Москвы",
+        "tin": "123546789",
+        "email": "email@gmail.com",
+        "phones": [  # M
+            {
+                "number": "+79134000404"
+            }
+        ]
+    },
+    "to_location": {
+        "code": "44",
+        "fias_guid": "0c5b2444-70a0-4932-980c-b4dc0d3f02b5",
+        "postal_code": "109004",
+        "longitude": 37.6204,
+        "latitude": 55.754,
+        "country_code": "RU",
+        "region": "Москва",
+        "sub_region": "Москва",
+        "city": "Москва",
+        "kladr_code": "7700000000000",
+        "address": "ул. Блюхера, 32"  # M
+    },
+    "print": 'barcode',
+    "packages": [
+        {
+            "number": "Коробка 1",  # M
+            "weight": "1000",  # M
+            #"length": 10,
+            #"width": 140,
+            #"height": 140,
+            "comment": "Комментарий к упаковке",
+            "items": {"name": 'Приборы',
+                      "ware_key": 123456789,
+"payment": {"value": 0},
+"cost": 1234.0,
+"weight": 200,
+"amount": 2
+                }
+        }
+    ]
+    }
+
+"""
+    "services": [
+        {
+            "code": "INSURANCE",
+            "parameter": "3000"
+        }
+    ],
+"""
 
 class CDEKApp(PGapp, log_app.LogApp):
     """ An CDEK app
@@ -217,27 +293,46 @@ class CDEKApp(PGapp, log_app.LogApp):
             payload['country_codes'] = 'ES'
             payload['page'] = page
             payload['size'] = size
-
         return self.api.cdek_req(self.api.url_regions, payload, 'GET')
 
+    def cdek_shp(self, shp_id):
+        """ Создаёт заказ для отправки с shp_id
+        """
+        payload = {}
+        self.curs_dict.callproc('shp.cdek_req_params', [shp_id])
+        # (sender_id, sender_address_id, receiver_id, receiver_address_id, boxes,
+        # wepay, pre_shipdate, delivery_type, is_terminal)
+        req = self.curs_dict.fetchone()
+        payload['type'] = 2
+        payload['tarif_code'] = 666
+        payload['comment'] = 'отправка shp_id'
+        payload['sender'] = req['sender']
+        #payload[''] =
+
+
+        return self.api.cdek_create_order(payload)
+
 if __name__ == '__main__':
-    LOG_FORMAT = '[%(filename)-21s:%(lineno)4s - %(funcName)20s()] \
-            %(levelname)-7s | %(asctime)-15s | %(message)s'
-    logging.basicConfig(stream=sys.stdout, format=LOG_FORMAT, level=logging.DEBUG)
-    logging.info('Start')
+    log_app.PARSER.add_argument('--uuid', type=str, help='an order uuid to check status')
+    log_app.PARSER.add_argument('--shp', type=int, help='a shp_id to create an order')
     ARGS = log_app.PARSER.parse_args()
     CDEK = CDEKApp(args=ARGS)
     if CDEK:
         logging.debug('CDEK.text=%s', CDEK.api.text)
-        #CDEK_RES = CDEK.cdek_webhook_reg('http://dru.kipspb.ru:8123', 'ORDER_STATUS')
-        # Webhooks info
-        #CDEK_RES = CDEK.api.cdek_webhook_list()
 
         # an order info
-        # CDEK_RES = CDEK.cdek_order('72753034-6edc-41d1-8abf-ab03d80fb89b')
+        if ARGS.uuid:
+            CDEK_RES = CDEK.api.cdek_order_uuid(ARGS.uuid)
 
         # regions
-        CDEK_RES = CDEK.cdek_regions(page=2, size=3)
+        #CDEK_RES = CDEK.cdek_regions(page=2, size=3)
+
+        # create demo order
+        #CDEK_RES = CDEK.api.cdek_create_order(payload=DEMO_PAYLOAD)
+
+        if ARGS.shp:
+            DEMO_PAYLOAD['number'] = ARGS.shp
+            CDEK_RES = CDEK.api.cdek_create_order(payload=DEMO_PAYLOAD)
 
         logging.debug('CDEK_RES=%s', json.dumps(CDEK_RES, ensure_ascii=False, indent=4))
 
