@@ -1,5 +1,7 @@
+DROP FUNCTION shp.cdek_to(shp_id integer);
+
 CREATE OR REPLACE FUNCTION shp.cdek_to(shp_id integer)
- RETURNS integer
+ RETURNS varchar
  LANGUAGE plpgsql
 AS $function$
 DECLARE

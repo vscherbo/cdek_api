@@ -13,6 +13,8 @@ import json
 
 import requests
 
+#from psycopg2.extras import DictRow
+
 from pg_app import PGapp
 import log_app
 
@@ -45,8 +47,10 @@ class CdekAPI():
         #self.status_code = 200
         self.err_msg = None
 
-        client_id = os.environ.get('CDEK_ACC')
-        client_secret = os.environ.get('CDEK_PWD')
+        #client_id = os.environ.get('CDEK_ACC')
+        #client_secret = os.environ.get('CDEK_PWD')
+        client_id = config['CDEK']['account']
+        client_secret = config['CDEK']['password']
 
         if self.need_login():
             #if client_id and client_secret:
@@ -197,7 +201,7 @@ class CdekAPI():
 DEMO_PAYLOAD = {
     "type": 1,  # интернет-магазин
     # "tariff_code": 482,  # для type:2 - 482: С-Д, 483: С-С
-    "tariff_code": 137,  # для type:1 - 137: С-Д, 136: С-С
+    "tariff_code": 137,  # для type:1 - 136: С-С, 137: С-Д, 138: Д-С, 139: Д-Д
     "comment": "Новый заказ",
     "number": 123,  # shp_id
     "shipment_point": "SPB9",
@@ -207,7 +211,8 @@ DEMO_PAYLOAD = {
         "email": "msk@cdek.ru",
         "phones": [  # M
             {
-                "number": "+79134000101"
+                "number": "+79134000101",
+                "additional": ""
             }
         ]
     },
@@ -299,21 +304,90 @@ class CDEKApp(PGapp, log_app.LogApp):
         """ Создаёт заказ для отправки с shp_id
         """
         payload = {}
-        self.curs_dict.callproc('shp.cdek_req_params', [shp_id])
-        # (sender_id, sender_address_id, receiver_id, receiver_address_id, boxes,
-        # wepay, pre_shipdate, delivery_type, is_terminal)
-        req = self.curs_dict.fetchone()
-        payload['type'] = 2
-        payload['tarif_code'] = 666
-        payload['comment'] = 'отправка shp_id'
-        payload['sender'] = req['sender']
-        #payload[''] =
+        payload['type'] = 1
+        payload['comment'] = f'отправка {shp_id}'
+        # tarif
+        self.curs_dict.callproc('shp.cdek_route', [shp_id])
+        tariff = self.curs_dict.fetchone()
+        payload['tariff_code'] = tariff[0]
+        # from
+        self.curs_dict.callproc('shp.cdek_from', [shp_id])
+        req_from = self.curs_dict.fetchone()
+        if payload['tariff_code'] in (136, 137):  # from SKLAD
+            payload['shipment_point'] = 'SPB9' # req_from[0]
+        elif payload['tariff_code'] in (138, 139):  # from DVER`
+            payload['from_location'] = {"address": req_from[0]}
+        # sender
+        self.curs_dict.callproc('shp.cdek_sender', [shp_id])
+        req_sender = self.curs_dict.fetchone()
+        payload['sender'] = {
+                'company': req_sender['company'],
+                'name': req_sender['name'],
+                'email': req_sender['email'],
+                'phones': {}
+                }
+        # sender phones
+        self.curs_dict.callproc('shp.cdek_sender_phones', [shp_id])
+        req_phones = self.curs_dict.fetchall()
+        payload['sender']['phones'] = []
+        for rec in req_phones:
+            d_rec = dict(rec)
+            payload['sender']['phones'].append(d_rec)
+        # to
+        self.curs_dict.callproc('shp.cdek_to', [shp_id])
+        req_to = self.curs_dict.fetchone()
+        if payload['tariff_code'] in (136, 138):  # to SKLAD
+            payload['delivery_point'] = req_to[0]
+        elif payload['tariff_code'] in (137, 139):  # to DVER`
+            payload['to_location'] = {"address": req_to[0]}
+        # recipient
+        self.curs_dict.callproc('shp.cdek_recipient', [shp_id])
+        req_recipient = self.curs_dict.fetchone()
+        payload['recipient'] = {
+                'company': req_recipient['company'],
+                'name': req_recipient['name'],
+                'email': req_recipient['email'],
+                'passport_series': req_recipient['passport_series'],
+                'passport_number': req_recipient['passport_number'],
+                'passport_date_of_issue': req_recipient['passport_date_of_issue'],
+                'passport_organization': req_recipient['passport_organization'],
+                'inn': req_recipient['inn'],
+                'phones': {}
+                }
+        # recipient phones
+        self.curs_dict.callproc('shp.cdek_recipient_phones', [shp_id])
+        req_phones = self.curs_dict.fetchall()
+        payload['recipient']['phones'] = []
+        for rec in req_phones:
+            d_rec = dict(rec)
+            payload['recipient']['phones'].append(d_rec)
 
+        # boxes = packages
+        self.curs_dict.callproc('shp.cdek_packages', [shp_id])
+        req_packages = self.curs_dict.fetchall()
+        logging.debug('type(req_packages)=%s', type(req_packages))
 
+        payload['packages'] = []
+        for rec in req_packages:
+            d_rec = dict(rec)
+            logging.debug('type(rec)=%s, d_rec=%s', type(rec), d_rec)
+            d_rec.update({'items': []})
+            self.curs_dict.callproc('shp.cdek_package_items', [shp_id])
+            req_items = self.curs_dict.fetchall()
+            for item in req_items:
+                d_item = dict(item)
+                d_item['cost'] = float(d_item['cost'])
+                d_item['payment'] = {"value": 0}
+                d_rec['items'].append(d_item)
+            payload['packages'].append(d_rec)
+
+        logging.debug('payload=%s', payload)
         return self.api.cdek_create_order(payload)
+        #return payload  # DEBUG
 
 if __name__ == '__main__':
     log_app.PARSER.add_argument('--uuid', type=str, help='an order uuid to check status')
+    log_app.PARSER.add_argument('--demoshp', type=str, help='a shp_id to create an order')
     log_app.PARSER.add_argument('--shp', type=int, help='a shp_id to create an order')
     ARGS = log_app.PARSER.parse_args()
     CDEK = CDEKApp(args=ARGS)
@@ -330,9 +404,12 @@ if __name__ == '__main__':
         # create demo order
         #CDEK_RES = CDEK.api.cdek_create_order(payload=DEMO_PAYLOAD)
 
-        if ARGS.shp:
-            DEMO_PAYLOAD['number'] = ARGS.shp
+        if ARGS.demoshp:
+            DEMO_PAYLOAD['number'] = ARGS.demoshp
             CDEK_RES = CDEK.api.cdek_create_order(payload=DEMO_PAYLOAD)
+
+        if ARGS.shp:
+            CDEK_RES = CDEK.cdek_shp(ARGS.shp)
 
         logging.debug('CDEK_RES=%s', json.dumps(CDEK_RES, ensure_ascii=False, indent=4))
 
