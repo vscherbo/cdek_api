@@ -368,11 +368,12 @@ class CDEKApp(PGapp, log_app.LogApp):
         logging.debug('type(req_packages)=%s', type(req_packages))
 
         payload['packages'] = []
-        for rec in req_packages:
+        for idx, rec in enumerate(req_packages):
             d_rec = dict(rec)
             logging.debug('type(rec)=%s, d_rec=%s', type(rec), d_rec)
             d_rec.update({'items': []})
-            self.curs_dict.callproc('shp.cdek_package_items', [shp_id])
+            #self.curs_dict.callproc('shp.cdek_package_items', [shp_id])
+            self.curs_dict.callproc('shp.cdek_package_items_virt', [shp_id, idx])
             req_items = self.curs_dict.fetchall()
             for item in req_items:
                 d_item = dict(item)
@@ -381,7 +382,7 @@ class CDEKApp(PGapp, log_app.LogApp):
                 d_rec['items'].append(d_item)
             payload['packages'].append(d_rec)
 
-        logging.debug('payload=%s', payload)
+        logging.debug('payload=%s', json.dumps(payload, ensure_ascii=False, indent=4))
         return self.api.cdek_create_order(payload)
         #return payload  # DEBUG
 
