@@ -3,7 +3,7 @@
 """
 Base class for api.cdek.ru
 """
-import os
+#import os
 #import sys
 from datetime import datetime
 from datetime import timedelta
@@ -30,7 +30,7 @@ class CdekAPI():
     _url_client_id = '%s/v2/oauth/token'
     _url_orders = '%s/v2/orders'
     _url_webhooks = '%s/v2/webhooks'
-    _url_print_barcodes = '%s/v2/print_barcodes'
+    _url_print_barcodes = '%s/v2/print/barcodes'
     url_regions = '%s/v2/location/regions'
     headers = {'Content-type': 'application/json'}
 
@@ -132,6 +132,7 @@ class CdekAPI():
                               json=payload,
                               headers=self.headers)
             status_code = resp.status_code
+            #logging.debug("resp=%s", resp.text)
             logging.debug("resp.url=%s", resp.url)
             self.err_msg = None
             logging.debug("status_code=%s", resp.status_code)
@@ -149,7 +150,10 @@ class CdekAPI():
             # catastrophic error. bail.
             self.err_msg = self.__exception_fmt__('RequestException', exc)
         else:
-            ret = resp.json()
+            try:
+                ret = resp.json()
+            except requests.exceptions.JSONDecodeError:
+                ret = resp
             # logging.debug("r.text=%s", r.text)
         finally:
             if self.err_msg:
@@ -190,6 +194,21 @@ class CdekAPI():
         """ Order info by a im_number
         """
         return self.cdek_req(f'{self._url_orders}?im_number={im_number}', None, method='GET')
+
+    def print_barcode(self, payload):
+        """ Request to create barcode for the order with uuid
+        """
+        return self.cdek_req(self._url_print_barcodes, payload)
+
+    def get_barcode(self, uuid):
+        """ Request to get url for downloading barcode by the uuid
+        """
+        return self.cdek_req(f'{self._url_print_barcodes}/{uuid}', None, method='GET')
+
+    def dl_barcode(self, uuid):
+        """ Download PDF from the url
+        """
+        return self.cdek_req(f'{self._url_print_barcodes}/{uuid}.pdf', None, method='GET')
 
     def cdek_webhook_reg(self, arg_url, arg_type):
         """ Webhook subscription
@@ -288,8 +307,9 @@ class CDEKApp(PGapp, log_app.LogApp):
     """
     def __init__(self, args):
         log_app.LogApp.__init__(self, args=args)
-        script_name = os.path.splitext(os.path.basename(__file__))[0]
-        config_filename = f'{script_name}.conf'
+        #script_name = os.path.splitext(os.path.basename(__file__))[0]
+        #config_filename = f'{script_name}.conf'
+        config_filename = args.conf
         self.get_config(config_filename)
         super().__init__(self.config['PG']['pg_host'],
                                       self.config['PG']['pg_user'])
@@ -396,8 +416,61 @@ class CDEKApp(PGapp, log_app.LogApp):
         return self.api.cdek_create_order(payload)
         #return payload  # DEBUG
 
+
+    def uuid_barcode(self, uuid, prn_format = 'A6'):
+        """ Метод используется для формирования ШК места в формате pdf к заказу
+        /заказам (TOD0)
+        """
+        payload = {}
+        loc_order = {'order_uuid': uuid}
+        loc_orders_list = []
+        loc_orders_list.append(loc_order)
+        logging.debug('loc_orders_list=%s', loc_orders_list)
+        #payload = {"orders": [loc_order], "format": prn_format}
+        #payload = {"orders": loc_orders_list, "format": prn_format}
+        payload["orders"] = loc_orders_list
+        payload["format"] = prn_format
+        logging.debug('payload=%s', json.dumps(payload, ensure_ascii=False, indent=4))
+        return self.api.print_barcode(payload)
+
+    def cdek_num_barcode(self, cdek_num, prn_format = 'A6'):
+        """ Метод используется для формирования ШК места в формате pdf к заказу
+        /заказам (TOD0)
+        """
+        payload = {}
+        loc_order = {'cdek_number': cdek_num}
+        loc_orders_list = []
+        loc_orders_list.append(loc_order)
+        logging.debug('loc_orders_list=%s', loc_orders_list)
+        #payload = {"orders": [loc_order], "format": prn_format}
+        #payload = {"orders": loc_orders_list, "format": prn_format}
+        payload["orders"] = loc_orders_list
+        payload["format"] = prn_format
+        logging.debug('payload=%s', json.dumps(payload, ensure_ascii=False, indent=4))
+        return self.api.print_barcode(payload)
+
+    def download_barcode(self, uuid, filename=None):
+        """ Метод используется для формирования ШК места в формате pdf к заказу
+        /заказам (TOD0)
+        """
+        loc_res = True
+        resp = self.api.dl_barcode(uuid)
+        if filename is None:
+            filename = f'{uuid}.pdf'
+        with open(filename, "wb") as barcode_output:
+            barcode_output.write(resp.content)
+        return loc_res
+
 if __name__ == '__main__':
     log_app.PARSER.add_argument('--uuid', type=str, help='an order uuid to check status')
+    log_app.PARSER.add_argument('--uuid_barcode', type=str, help=\
+'an order uuid to print a barcode')
+    log_app.PARSER.add_argument('--cdek_num_barcode', type=int, help=\
+'an order cdek_number to print a barcode')
+    log_app.PARSER.add_argument('--get_barcode', type=str, help=\
+'get url of the barcode by the uuid')
+    log_app.PARSER.add_argument('--dl_barcode', type=str, help=\
+'download PDF with barc code by uuid')
     log_app.PARSER.add_argument('--cdek_number', type=str, help=\
 'an order cdek_number to check status')
     log_app.PARSER.add_argument('--im_number', type=str, help='an order im_number to check status')
@@ -433,7 +506,19 @@ if __name__ == '__main__':
         if ARGS.hooks:
             CDEK_RES = CDEK.api.cdek_webhook_list()
 
-        logging.debug('CDEK_RES=%s', json.dumps(CDEK_RES, ensure_ascii=False, indent=4))
+        if ARGS.uuid_barcode:
+            CDEK_RES = CDEK.uuid_barcode(ARGS.uuid_barcode)
+
+        if ARGS.cdek_num_barcode:
+            CDEK_RES = CDEK.cdek_num_barcode(ARGS.cdek_num_barcode)
+
+        if ARGS.get_barcode:
+            CDEK_RES = CDEK.api.get_barcode(ARGS.get_barcode)
+
+        if ARGS.dl_barcode:
+            CDEK_RES = CDEK.download_barcode(ARGS.dl_barcode)
+
+        #logging.debug('CDEK_RES=%s', json.dumps(CDEK_RES, ensure_ascii=False, indent=4))
 
 
         #logging.debug('CDEK.text=%s', CDEK.text)
