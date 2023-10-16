@@ -181,6 +181,16 @@ class CdekAPI():
         """
         return self.cdek_req(f'{self._url_orders}/{uuid}', None, method='GET')
 
+    def cdek_order_cdek_number(self, cdek_number):
+        """ Order info by a cdek_number
+        """
+        return self.cdek_req(f'{self._url_orders}?cdek_number={cdek_number}', None, method='GET')
+
+    def im_order_im_number(self, im_number):
+        """ Order info by a im_number
+        """
+        return self.cdek_req(f'{self._url_orders}?im_number={im_number}', None, method='GET')
+
     def cdek_webhook_reg(self, arg_url, arg_type):
         """ Webhook subscription
         """
@@ -192,7 +202,7 @@ class CdekAPI():
     def cdek_webhook_list(self):
         """ Webhook subscription info
         """
-        return self.cdek_req(self._url_webhooks, 'GET')
+        return self.cdek_req(self._url_webhooks, '', 'GET')
 
 ##################################################################
 #
@@ -388,8 +398,12 @@ class CDEKApp(PGapp, log_app.LogApp):
 
 if __name__ == '__main__':
     log_app.PARSER.add_argument('--uuid', type=str, help='an order uuid to check status')
+    log_app.PARSER.add_argument('--cdek_number', type=str, help=\
+'an order cdek_number to check status')
+    log_app.PARSER.add_argument('--im_number', type=str, help='an order im_number to check status')
     log_app.PARSER.add_argument('--demoshp', type=str, help='a shp_id to create an order')
     log_app.PARSER.add_argument('--shp', type=int, help='a shp_id to create an order')
+    log_app.PARSER.add_argument('--hooks', type=int, help='a shp_id to create an order')
     ARGS = log_app.PARSER.parse_args()
     CDEK = CDEKApp(args=ARGS)
     if CDEK:
@@ -398,6 +412,10 @@ if __name__ == '__main__':
         # an order info
         if ARGS.uuid:
             CDEK_RES = CDEK.api.cdek_order_uuid(ARGS.uuid)
+        if ARGS.cdek_number:
+            CDEK_RES = CDEK.api.cdek_order_cdek_number(ARGS.cdek_number)
+        if ARGS.im_number:
+            CDEK_RES = CDEK.api.im_order_im_number(ARGS.im_number)
 
         # regions
         #CDEK_RES = CDEK.cdek_regions(page=2, size=3)
@@ -411,6 +429,9 @@ if __name__ == '__main__':
 
         if ARGS.shp:
             CDEK_RES = CDEK.cdek_shp(ARGS.shp)
+
+        if ARGS.hooks:
+            CDEK_RES = CDEK.api.cdek_webhook_list()
 
         logging.debug('CDEK_RES=%s', json.dumps(CDEK_RES, ensure_ascii=False, indent=4))
 
