@@ -340,6 +340,9 @@ class CDEKApp(PGapp, log_app.LogApp):
         self.curs_dict.callproc('shp.cdek_route', [shp_id])
         tariff = self.curs_dict.fetchone()
         payload['tariff_code'] = tariff[0]
+        # TOD0
+        #payload['number'] = lowest bill_no for shp_id
+
         # from
         self.curs_dict.callproc('shp.cdek_from', [shp_id])
         req_from = self.curs_dict.fetchone()
@@ -477,6 +480,7 @@ if __name__ == '__main__':
     log_app.PARSER.add_argument('--demoshp', type=str, help='a shp_id to create an order')
     log_app.PARSER.add_argument('--shp', type=int, help='a shp_id to create an order')
     log_app.PARSER.add_argument('--hooks', type=int, help='a shp_id to create an order')
+    log_app.PARSER.add_argument('--wh_type', type=str, help='a webhook type to register')
     ARGS = log_app.PARSER.parse_args()
     CDEK = CDEKApp(args=ARGS)
     if CDEK:
@@ -518,7 +522,10 @@ if __name__ == '__main__':
         if ARGS.dl_barcode:
             CDEK_RES = CDEK.download_barcode(ARGS.dl_barcode)
 
-        #logging.debug('CDEK_RES=%s', json.dumps(CDEK_RES, ensure_ascii=False, indent=4))
+        if ARGS.wh_type:
+            CDEK_RES = CDEK.api.cdek_webhook_reg('http://dru.kipspb.ru:8123', ARGS.wh_type)
+
+        logging.debug('CDEK_RES=%s', json.dumps(CDEK_RES, ensure_ascii=False, indent=4))
 
 
         #logging.debug('CDEK.text=%s', CDEK.text)
