@@ -29,6 +29,7 @@ class CdekAPI():
     #url_orders = '%s/v2/orders' % HOST
     _url_client_id = '%s/v2/oauth/token'
     _url_orders = '%s/v2/orders'
+    _url_calc_tariff = '%s/v2/calculator/tariff'
     _url_webhooks = '%s/v2/webhooks'
     _url_print_barcodes = '%s/v2/print/barcodes'
     url_regions = '%s/v2/location/regions'
@@ -210,6 +211,11 @@ class CdekAPI():
         """
         return self.cdek_req(f'{self._url_print_barcodes}/{uuid}.pdf', None, method='GET')
 
+    def calc_tariff(self, payload):
+        """ Расчёт стоимости доставки
+        """
+        return self.cdek_req(self._url_calc_tariff, payload)
+
     def cdek_webhook_reg(self, arg_url, arg_type):
         """ Webhook subscription
         """
@@ -233,7 +239,7 @@ DEMO_PAYLOAD = {
     "tariff_code": 137,  # для type:1 - 136: С-С, 137: С-Д, 138: Д-С, 139: Д-Д
     "comment": "Новый заказ",
     "number": 123,  # shp_id
-    "shipment_point": "SPB9",
+    # "shipment_point": "SPB9", заранее не указать, выбор водителя
     "sender": {
         "company": "Компания",
         "name": "Петров Петр",  # M
@@ -259,6 +265,10 @@ DEMO_PAYLOAD = {
                 "number": "+79134000404"
             }
         ]
+    },
+    "from_location": {
+        "code": "137",
+        "address": "ул. Ясная, 11"  # M
     },
     "to_location": {
         "code": "44",
@@ -347,7 +357,9 @@ class CDEKApp(PGapp, log_app.LogApp):
         self.curs_dict.callproc('shp.cdek_from', [shp_id])
         req_from = self.curs_dict.fetchone()
         if payload['tariff_code'] in (136, 137):  # from SKLAD
-            payload['shipment_point'] = 'SPB9' # req_from[0]
+            #payload['shipment_point'] = 'SPB9' # req_from[0]
+            payload['from_location'] = {'code': 137, # Санкт-Петербург
+                    'address': "Мурино, Ясная 11"}
         elif payload['tariff_code'] in (138, 139):  # from DVER`
             payload['from_location'] = {"address": req_from[0]}
         # sender
@@ -395,6 +407,7 @@ class CDEKApp(PGapp, log_app.LogApp):
             d_rec = dict(rec)
             payload['recipient']['phones'].append(d_rec)
 
+        """ self._packages()
         # boxes = packages
         self.curs_dict.callproc('shp.cdek_packages', [shp_id])
         req_packages = self.curs_dict.fetchall()
@@ -414,11 +427,37 @@ class CDEKApp(PGapp, log_app.LogApp):
                 d_item['payment'] = {"value": 0}
                 d_rec['items'].append(d_item)
             payload['packages'].append(d_rec)
+        """
+
+        payload['packages'] = self._packages(shp_id)
 
         logging.debug('payload=%s', json.dumps(payload, ensure_ascii=False, indent=4))
         return self.api.cdek_create_order(payload)
         #return payload  # DEBUG
 
+    def _packages(self, shp_id):
+        """ Returens list of packages
+        """
+        # boxes = packages
+        self.curs_dict.callproc('shp.cdek_packages', [shp_id])
+        req_packages = self.curs_dict.fetchall()
+        logging.debug('type(req_packages)=%s', type(req_packages))
+
+        loc_packages = []
+        for idx, rec in enumerate(req_packages):
+            d_rec = dict(rec)
+            logging.debug('type(rec)=%s, d_rec=%s', type(rec), d_rec)
+            d_rec.update({'items': []})
+            #self.curs_dict.callproc('shp.cdek_package_items', [shp_id])
+            self.curs_dict.callproc('shp.cdek_package_items_virt', [shp_id, idx])
+            req_items = self.curs_dict.fetchall()
+            for item in req_items:
+                d_item = dict(item)
+                d_item['cost'] = float(d_item['cost'])
+                d_item['payment'] = {"value": 0}
+                d_rec['items'].append(d_item)
+            loc_packages.append(d_rec)
+        return loc_packages
 
     def uuid_barcode(self, uuid, prn_format = 'A6'):
         """ Метод используется для формирования ШК места в формате pdf к заказу
@@ -464,6 +503,35 @@ class CDEKApp(PGapp, log_app.LogApp):
             barcode_output.write(resp.content)
         return loc_res
 
+    def calc_tariff(self, shp_id):
+        """ Метод используется для расчета стоимости и сроков доставки по коду тарифа
+        """
+        payload = {}
+        payload['type'] = 1
+        # tarif
+        self.curs_dict.callproc('shp.cdek_route', [shp_id])
+        tariff = self.curs_dict.fetchone()
+        payload['tariff_code'] = tariff[0]
+        # from
+        self.curs_dict.callproc('shp.cdek_from', [shp_id])
+        req_from = self.curs_dict.fetchone()
+        payload['from_location'] = {"address": req_from[0]}
+        # to
+        self.curs_dict.callproc('shp.cdek_to', [shp_id])
+        req_to = self.curs_dict.fetchone()
+        payload['to_location'] = {"address": req_to[0]}
+        # packages
+        payload['packages'] = self._packages(shp_id)
+        # insurance
+        total_sum = 0
+        for pckg in payload['packages']:
+            for item in pckg['items']:
+                total_sum += item['cost']
+
+        loc_serv = [{'code': 'INSURANCE', 'parameter': str(total_sum)}]
+        payload['services'] = loc_serv
+        return self.api.calc_tariff(payload)
+
 if __name__ == '__main__':
     log_app.PARSER.add_argument('--uuid', type=str, help='an order uuid to check status')
     log_app.PARSER.add_argument('--uuid_barcode', type=str, help=\
@@ -473,12 +541,13 @@ if __name__ == '__main__':
     log_app.PARSER.add_argument('--get_barcode', type=str, help=\
 'get url of the barcode by the uuid')
     log_app.PARSER.add_argument('--dl_barcode', type=str, help=\
-'download PDF with barc code by uuid')
+"download PDF with barcode by its uuid (not order uuid)")
     log_app.PARSER.add_argument('--cdek_number', type=str, help=\
 'an order cdek_number to check status')
     log_app.PARSER.add_argument('--im_number', type=str, help='an order im_number to check status')
     log_app.PARSER.add_argument('--demoshp', type=str, help='a shp_id to create an order')
     log_app.PARSER.add_argument('--shp', type=int, help='a shp_id to create an order')
+    log_app.PARSER.add_argument('--calc', type=int, help='a shp_id to calculate a shipment cost')
     log_app.PARSER.add_argument('--hooks', type=int, help='a shp_id to create an order')
     log_app.PARSER.add_argument('--wh_type', type=str, help='a webhook type to register')
     ARGS = log_app.PARSER.parse_args()
@@ -506,6 +575,9 @@ if __name__ == '__main__':
 
         if ARGS.shp:
             CDEK_RES = CDEK.cdek_shp(ARGS.shp)
+
+        if ARGS.calc:
+            CDEK_RES = CDEK.calc_tariff(ARGS.calc)
 
         if ARGS.hooks:
             CDEK_RES = CDEK.api.cdek_webhook_list()
