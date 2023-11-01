@@ -33,6 +33,7 @@ class CdekAPI():
     _url_webhooks = '%s/v2/webhooks'
     _url_print_barcodes = '%s/v2/print/barcodes'
     url_regions = '%s/v2/location/regions'
+    _url_delivery_points = '%s/v2/deliverypoints'
     headers = {'Content-type': 'application/json'}
 
     #def __init__(self, client_id=None, client_secret=None, api_url=HOST):
@@ -229,6 +230,11 @@ class CdekAPI():
         """
         return self.cdek_req(self._url_webhooks, '', 'GET')
 
+    def delivery_points(self, payload):
+        """ Метод предназначен для получения списка действующих офисов СДЭК
+        """
+        return self.cdek_req(self._url_delivery_points, payload, 'GET')
+
 ##################################################################
 #
 #
@@ -357,9 +363,10 @@ class CDEKApp(PGapp, log_app.LogApp):
         self.curs_dict.callproc('shp.cdek_from', [shp_id])
         req_from = self.curs_dict.fetchone()
         if payload['tariff_code'] in (136, 137):  # from SKLAD
+            payload['from_location'] = {'code': 137} # Санкт-Петербург
             #payload['shipment_point'] = 'SPB9' # req_from[0]
-            payload['from_location'] = {'code': 137, # Санкт-Петербург
-                    'address': "Мурино, Ясная 11"}
+            #payload['from_location'] = {'code': 137, # Санкт-Петербург
+            #        'address': "Мурино, Ясная 11"}
         elif payload['tariff_code'] in (138, 139):  # from DVER`
             payload['from_location'] = {"address": req_from[0]}
         # sender
@@ -430,6 +437,13 @@ class CDEKApp(PGapp, log_app.LogApp):
         """
 
         payload['packages'] = self._packages(shp_id)
+
+        loc_cost = self.calc_tariff(shp_id)
+        payload['delivery_recipient_cost'] = {
+            'value': loc_cost["delivery_sum"],
+            #'vat_sum': 0,
+            #'vat_rate': None
+        }
 
         logging.debug('payload=%s', json.dumps(payload, ensure_ascii=False, indent=4))
         return self.api.cdek_create_order(payload)
@@ -512,14 +526,44 @@ class CDEKApp(PGapp, log_app.LogApp):
         self.curs_dict.callproc('shp.cdek_route', [shp_id])
         tariff = self.curs_dict.fetchone()
         payload['tariff_code'] = tariff[0]
+        # DEBUG payload['tariff_code'] = 136
         # from
         self.curs_dict.callproc('shp.cdek_from', [shp_id])
         req_from = self.curs_dict.fetchone()
         payload['from_location'] = {"address": req_from[0]}
+        """
+        ##### DEBUG only
+        #payload['from_location'] = {"code": 137}
+        payload['from_location'] = {
+                "city": 'Санкт-Петербург',
+                #"city_code": 137,
+                #"address": 'пр-т Богатырский, 28 , кв. 128'
+                "address": "ул. Тележная, 9  пом 5Н"
+                }
+        #'195257, Россия, Санкт-Петербург, Санкт-Петербург, пр-т Гражданский, 84 , пом36Н'}
+        """
         # to
         self.curs_dict.callproc('shp.cdek_to', [shp_id])
         req_to = self.curs_dict.fetchone()
-        payload['to_location'] = {"address": req_to[0]}
+        if payload['tariff_code'] in (136, 138):  # до Склада
+            self.curs_dict.callproc('shp.cdek_pvz_addr', [req_to[0]])
+            req_pvz = self.curs_dict.fetchone()
+            payload['to_location'] = {"code": req_pvz[0]}
+            """ DEBUG
+            payload['to_location'] = {#"code": req_pvz[0],
+                    "city": 'Санкт-Петербург',
+                    "address": 'пр-т Гражданский, 84 , пом36Н'
+                    #"address": "ул. Тележная, 9  пом 5Н"
+                    #
+                    #"city": "Кингисепп",
+                    #"city_code": 138,
+                    #"address": "пр. Карла Маркса, 39"
+                    }
+            """
+        else:
+            #payload['to_location'] = {"code": req_pvz[0]}
+            payload['to_location'] = {"address": req_to[0]}
+
         # packages
         payload['packages'] = self._packages(shp_id)
         # insurance
@@ -530,7 +574,16 @@ class CDEKApp(PGapp, log_app.LogApp):
 
         loc_serv = [{'code': 'INSURANCE', 'parameter': str(total_sum)}]
         payload['services'] = loc_serv
+        logging.debug('payload=%s', json.dumps(payload, ensure_ascii=False,
+                                               sort_keys=True,
+                                               indent=4))
         return self.api.calc_tariff(payload)
+
+    def delivery_points(self, city_code):
+        """ Метод предназначен для получения списка действующих офисов СДЭК
+        """
+        payload = {'city_code': city_code}
+        return self.api.delivery_points(payload)
 
 if __name__ == '__main__':
     log_app.PARSER.add_argument('--uuid', type=str, help='an order uuid to check status')
@@ -550,6 +603,7 @@ if __name__ == '__main__':
     log_app.PARSER.add_argument('--calc', type=int, help='a shp_id to calculate a shipment cost')
     log_app.PARSER.add_argument('--hooks', type=int, help='a shp_id to create an order')
     log_app.PARSER.add_argument('--wh_type', type=str, help='a webhook type to register')
+    log_app.PARSER.add_argument('--city_code', type=str, help='List of delivery pints in city_code')
     ARGS = log_app.PARSER.parse_args()
     CDEK = CDEKApp(args=ARGS)
     if CDEK:
@@ -578,6 +632,13 @@ if __name__ == '__main__':
 
         if ARGS.calc:
             CDEK_RES = CDEK.calc_tariff(ARGS.calc)
+            """
+            order_payload['delivery_recipient_cost'] = {
+                value: CDEK_RES["delivery_sum"],
+                vat_sum:
+                vat_rate:
+            }
+            """
 
         if ARGS.hooks:
             CDEK_RES = CDEK.api.cdek_webhook_list()
@@ -596,6 +657,9 @@ if __name__ == '__main__':
 
         if ARGS.wh_type:
             CDEK_RES = CDEK.api.cdek_webhook_reg('http://dru.kipspb.ru:8123', ARGS.wh_type)
+
+        if ARGS.city_code:
+            CDEK_RES = CDEK.delivery_points(ARGS.city_code)
 
         logging.debug('CDEK_RES=%s', json.dumps(CDEK_RES, ensure_ascii=False, indent=4))
 
