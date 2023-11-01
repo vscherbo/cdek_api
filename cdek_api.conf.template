@@ -1,0 +1,11 @@
+[PG]
+pg_host = <pg-host>
+pg_user = <pg-user>
+
+[CDEK]
+account=<CDEK_ACC>
+password=<CDEK_PWD>
+api_url = https://api.edu.cdek.ru
+token = <a token will be saved here> 
+created = "10.10.2023 18:37:47"
+
