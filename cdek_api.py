@@ -351,7 +351,20 @@ class CDEKApp(PGapp, log_app.LogApp):
         """
         payload = {}
         payload['type'] = 1
-        payload['comment'] = f'отправка {shp_id}'
+        bills_select = self.curs_dict.mogrify(
+                'SELECT bill::varchar FROM shp.ship_bills WHERE shp_id = %s',
+                (shp_id,)
+                )
+        logging.debug('bills_select=%s', bills_select)
+        if self.run_query(bills_select, dict_mode=True) == 0:
+            req_bills = self.curs_dict.fetchall()
+            logging.debug('req_bills=%s', req_bills)
+            payload['comment'] = ', '.join([','.join(bill) for bill in req_bills])
+        else:
+            payload['comment'] = f'отправка {shp_id}'
+
+        # OLD payload['comment'] = f'отправка {shp_id}'
+
         # tarif
         self.curs_dict.callproc('shp.cdek_route', [shp_id])
         tariff = self.curs_dict.fetchone()
@@ -363,9 +376,11 @@ class CDEKApp(PGapp, log_app.LogApp):
         self.curs_dict.callproc('shp.cdek_from', [shp_id])
         req_from = self.curs_dict.fetchone()
         if payload['tariff_code'] in (136, 137):  # from SKLAD
-            payload['from_location'] = {'code': 137} # Санкт-Петербург
+            # -- payload['from_location'] = {'code': 137} # Санкт-Петербург
             #payload['shipment_point'] = 'SPB9' # req_from[0]
-            #payload['from_location'] = {'code': 137, # Санкт-Петербург
+            payload['from_location'] = {
+                    'city': "Санкт-Петербург",
+                    'address': req_from[0]}
             #        'address': "Мурино, Ясная 11"}
         elif payload['tariff_code'] in (138, 139):  # from DVER`
             payload['from_location'] = {"address": req_from[0]}
@@ -414,40 +429,60 @@ class CDEKApp(PGapp, log_app.LogApp):
             d_rec = dict(rec)
             payload['recipient']['phones'].append(d_rec)
 
-        """ self._packages()
-        # boxes = packages
-        self.curs_dict.callproc('shp.cdek_packages', [shp_id])
-        req_packages = self.curs_dict.fetchall()
-        logging.debug('type(req_packages)=%s', type(req_packages))
-
-        payload['packages'] = []
-        for idx, rec in enumerate(req_packages):
-            d_rec = dict(rec)
-            logging.debug('type(rec)=%s, d_rec=%s', type(rec), d_rec)
-            d_rec.update({'items': []})
-            #self.curs_dict.callproc('shp.cdek_package_items', [shp_id])
-            self.curs_dict.callproc('shp.cdek_package_items_virt', [shp_id, idx])
-            req_items = self.curs_dict.fetchall()
-            for item in req_items:
-                d_item = dict(item)
-                d_item['cost'] = float(d_item['cost'])
-                d_item['payment'] = {"value": 0}
-                d_rec['items'].append(d_item)
-            payload['packages'].append(d_rec)
-        """
-
         payload['packages'] = self._packages(shp_id)
 
-        loc_cost = self.calc_tariff(shp_id)
-        payload['delivery_recipient_cost'] = {
-            'value': loc_cost["delivery_sum"],
-            #'vat_sum': 0,
-            #'vat_rate': None
-        }
+        payload['delivery_recipient_cost'] = self._delivery_cost(shp_id)
+        """
+        # Если ОтгрузкаОплата = Они
+        wepay_select = self.curs.mogrify(
+                'SELECT wepay FROM shp.ship_bills WHERE shp_id = %s',
+                (shp_id,)
+                )
+        logging.debug('wepay_select=%s', wepay_select)
+        if self.do_query(wepay_select, reconnect=True):
+            req_wepay = self.curs.fetchone()
+            logging.debug('req_wepay=%s', req_wepay)
+            if not req_wepay[0]:  # не Мы
+                logging.debug('ОтгрузкаОплата = Они, рассчитываем стоимость')
+                loc_cost = self.calc_tariff(shp_id)
+                payload['delivery_recipient_cost'] = {
+                    'value': loc_cost["delivery_sum"],
+                    #'vat_sum': 0,  !!!T0DO
+                    #'vat_rate': None
+                }
+        else:
+            logging.warning('req_wepay NOT FOUND for shp_id=%s', shp_id)
+        """
 
-        logging.debug('payload=%s', json.dumps(payload, ensure_ascii=False, indent=4))
+        logging.debug('cdek_shp: payload=%s', json.dumps(payload, ensure_ascii=False, indent=4))
         return self.api.cdek_create_order(payload)
         #return payload  # DEBUG
+
+    def _delivery_cost(self, shp_id):
+        """ Returns values for payload['delivery_recipient_cost']
+        """
+        res = None
+        wepay_select = self.curs.mogrify(
+                'SELECT wepay FROM shp.ship_bills WHERE shp_id = %s',
+                (shp_id,)
+                )
+        logging.debug('wepay_select=%s', wepay_select)
+        if self.do_query(wepay_select, reconnect=True):
+            req_wepay = self.curs.fetchone()
+            logging.debug('req_wepay=%s', req_wepay)
+            if not req_wepay[0]:  # ОтгрузкаОплата не Мы
+                logging.debug('ОтгрузкаОплата = Они, рассчитываем стоимость')
+                loc_cost = self.calc_tariff(shp_id)
+                logging.debug('loc_cost=%s', loc_cost)
+                res = {
+                    'value': loc_cost["total_sum"],
+                    # BAD 'value': loc_cost["delivery_sum"],
+                    #'vat_sum': 0,  !!!T0DO
+                    #'vat_rate': None
+                }
+        else:
+            logging.warning('req_wepay NOT FOUND for shp_id=%s', shp_id)
+        return res
 
     def _packages(self, shp_id):
         """ Returens list of packages
@@ -455,15 +490,18 @@ class CDEKApp(PGapp, log_app.LogApp):
         # boxes = packages
         self.curs_dict.callproc('shp.cdek_packages', [shp_id])
         req_packages = self.curs_dict.fetchall()
-        logging.debug('type(req_packages)=%s', type(req_packages))
+        logging.debug('len(req_packages)=%s', len(req_packages))
+        boxes = len(req_packages)
 
         loc_packages = []
         for idx, rec in enumerate(req_packages):
             d_rec = dict(rec)
             logging.debug('type(rec)=%s, d_rec=%s', type(rec), d_rec)
             d_rec.update({'items': []})
-            #self.curs_dict.callproc('shp.cdek_package_items', [shp_id])
-            self.curs_dict.callproc('shp.cdek_package_items_virt', [shp_id, idx])
+            if boxes == 1:  # для одной коробки реальная опись
+                self.curs_dict.callproc('shp.cdek_package_items', [shp_id])
+            else:
+                self.curs_dict.callproc('shp.cdek_package_items_virt', [shp_id, idx])
             req_items = self.curs_dict.fetchall()
             for item in req_items:
                 d_item = dict(item)
@@ -530,25 +568,17 @@ class CDEKApp(PGapp, log_app.LogApp):
         # from
         self.curs_dict.callproc('shp.cdek_from', [shp_id])
         req_from = self.curs_dict.fetchone()
-        payload['from_location'] = {"address": req_from[0]}
-        """
-        ##### DEBUG only
-        #payload['from_location'] = {"code": 137}
-        payload['from_location'] = {
-                "city": 'Санкт-Петербург',
-                #"city_code": 137,
-                #"address": 'пр-т Богатырский, 28 , кв. 128'
-                "address": "ул. Тележная, 9  пом 5Н"
-                }
-        #'195257, Россия, Санкт-Петербург, Санкт-Петербург, пр-т Гражданский, 84 , пом36Н'}
-        """
+        payload['from_location'] = {'code': 137, # Санкт-Петербург
+                "address": req_from[0]}
         # to
         self.curs_dict.callproc('shp.cdek_to', [shp_id])
         req_to = self.curs_dict.fetchone()
         if payload['tariff_code'] in (136, 138):  # до Склада
             self.curs_dict.callproc('shp.cdek_pvz_addr', [req_to[0]])
             req_pvz = self.curs_dict.fetchone()
-            payload['to_location'] = {"code": req_pvz[0]}
+            payload['to_location'] = {"address": req_pvz[0]}
+            #payload['to_location'] = {"code": req_pvz[0]}
+
             """ DEBUG
             payload['to_location'] = {#"code": req_pvz[0],
                     "city": 'Санкт-Петербург',
@@ -570,7 +600,7 @@ class CDEKApp(PGapp, log_app.LogApp):
         total_sum = 0
         for pckg in payload['packages']:
             for item in pckg['items']:
-                total_sum += item['cost']
+                total_sum += item['cost']*item['amount']
 
         loc_serv = [{'code': 'INSURANCE', 'parameter': str(total_sum)}]
         payload['services'] = loc_serv
