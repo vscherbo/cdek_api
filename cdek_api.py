@@ -318,8 +318,14 @@ DEMO_PAYLOAD = {
         }
     ],
 """
+
+UPD_SENT_SQL = 'UPDATE shp.cdek_preorder_params \
+SET sts_code=%s, ret_code=%s, cdek_uuid=%s, ret_msg=%s WHERE shp_id = %s;'
+
 UPD_SQL = 'UPDATE shp.cdek_preorder_params \
-SET sts_code=%s, ret_code=%s, ret_msg=%s WHERE shp_id = %s;'
+SET sts_code=%s, ret_code=%s, cdek_uuid=%s, cdek_number=%s, our_number=%s, ret_msg=%s \
+WHERE cdek_uuid = %s;'
+#SET sts_code=%s, cdek_number=%s, cdek_uuid=%s, our_number=%s WHERE shp_id = %s;'
 
 class CDEKApp(PGapp, log_app.LogApp):
     """ An CDEK app
@@ -369,29 +375,94 @@ VALUES (%s, %s)', (shp_id, json_payload))
         """ Parse API answer
             and write errors message into DB
         """
-        self.ret_msg = ''
-        # parse answer for state <> ACCEPTED
+        self.ret_msg = None
+        sts_code = 0
+        uuid = None
+        # parse answer for state
         for req in res['requests']:
             if req['type'] == 'CREATE' and req['state'] != 'ACCEPTED':
+                sts_code = 90
                 logging.warning('CREATE request is not ACCEPTED')
                 msg_list = []
                 err_list = req.get('errors')
                 for err in err_list:
                     msg_list.append(err['message'])
                 self.ret_msg = '/'.join(msg_list)
-        # update shp.cdek_preorder_params if there were errors
-        if self.ret_msg != '':
-            upd_sql = self.curs.mogrify(UPD_SQL, (90, self.api.status_code, self.ret_msg, shp_id))
-            logging.debug('upd_sql=%s', upd_sql)
-            if not self.do_query(upd_sql):
-                logging.error('FAILED upd_sql=%s', upd_sql)
+            if req['type'] == 'CREATE' and req['state'] == 'ACCEPTED':
+                sts_code = 10
+                logging.debug('ACCEPTED')
+                uuid = res['entity']['uuid']
 
+        # update shp.cdek_preorder_params if got status
+        if sts_code != 0:
+            upd_sent_sql = self.curs.mogrify(UPD_SENT_SQL, (sts_code, self.api.status_code,
+                                            uuid, self.ret_msg, shp_id))
+            logging.debug('upd_sent_sql=%s', upd_sent_sql)
+            if not self.do_query(upd_sent_sql):
+                logging.error('FAILED upd_sent_sql=%s', upd_sent_sql)
+
+    def _comment(self, shp_id):
+        """ Bills list to comment
+        """
+        bills_select = self.curs_dict.mogrify(
+                'SELECT bill::varchar FROM shp.ship_bills WHERE shp_id = %s',
+                (shp_id,)
+                )
+        logging.debug('bills_select=%s', bills_select)
+        if self.run_query(bills_select, dict_mode=True) == 0:
+            req_bills = self.curs_dict.fetchall()
+            logging.debug('req_bills=%s', req_bills)
+            ret_comment = ', '.join([','.join(bill) for bill in req_bills])
+        else:
+            ret_comment = f'отправка {shp_id}'
+        return ret_comment
+
+    def _from(self, shp_id, tariff_code):
+        """ Returns 'from' field for preorder
+        """
+        self.curs_dict.callproc('shp.cdek_from', [shp_id])
+        req_from = self.curs_dict.fetchone()
+        if tariff_code in (136, 137):  # from SKLAD
+            # -- ret_from = {'code': 137} # Санкт-Петербург
+            #payload['shipment_point'] = 'SPB9' # req_from[0]
+            ret_from = {
+                    'city': "Санкт-Петербург",
+                    'address': req_from[0]}
+            #        'address': "Мурино, Ясная 11"}
+        elif tariff_code in (138, 139):  # from DVER`
+            ret_from = {"address": req_from[0]}
+        return ret_from
+
+    def _sender(self, shp_id):
+        # sender
+        self.curs_dict.callproc('shp.cdek_sender', [shp_id])
+        req_sender = self.curs_dict.fetchone()
+        ret_sender = {
+                'company': req_sender['company'],
+                'name': req_sender['name'],
+                'email': req_sender['email'],
+                'phones': {}
+                }
+        # sender phones
+        self.curs_dict.callproc('shp.cdek_sender_phones', [shp_id])
+        req_phones = self.curs_dict.fetchall()
+        #ret_sender['phones'] = []
+        phones = []
+        for rec in req_phones:
+            d_rec = dict(rec)
+            phones.append(d_rec)
+            #ret_sender['phones'].append(d_rec)
+        ret_sender['phones'] = phones
+
+        return ret_sender
 
     def cdek_shp(self, shp_id):
         """ Создаёт заказ для отправки с shp_id
         """
         payload = {}
         payload['type'] = 1  # интернет-магазин (ИМ)
+        payload['number'] = shp_id  # Номер заказа в ИС Клиента
+        """
         bills_select = self.curs_dict.mogrify(
                 'SELECT bill::varchar FROM shp.ship_bills WHERE shp_id = %s',
                 (shp_id,)
@@ -403,44 +474,21 @@ VALUES (%s, %s)', (shp_id, json_payload))
             payload['comment'] = ', '.join([','.join(bill) for bill in req_bills])
         else:
             payload['comment'] = f'отправка {shp_id}'
+        """
 
-        # OLD payload['comment'] = f'отправка {shp_id}'
+        payload['comment'] = self._comment(shp_id)
 
         # tarif
         self.curs_dict.callproc('shp.cdek_route', [shp_id])
         tariff = self.curs_dict.fetchone()
         payload['tariff_code'] = tariff[0]
-        # TOD0
-        #payload['number'] = lowest bill_no for shp_id
 
         # from
-        self.curs_dict.callproc('shp.cdek_from', [shp_id])
-        req_from = self.curs_dict.fetchone()
-        if payload['tariff_code'] in (136, 137):  # from SKLAD
-            # -- payload['from_location'] = {'code': 137} # Санкт-Петербург
-            #payload['shipment_point'] = 'SPB9' # req_from[0]
-            payload['from_location'] = {
-                    'city': "Санкт-Петербург",
-                    'address': req_from[0]}
-            #        'address': "Мурино, Ясная 11"}
-        elif payload['tariff_code'] in (138, 139):  # from DVER`
-            payload['from_location'] = {"address": req_from[0]}
+        payload['from_location'] = self._from(shp_id, payload['tariff_code'])
+
         # sender
-        self.curs_dict.callproc('shp.cdek_sender', [shp_id])
-        req_sender = self.curs_dict.fetchone()
-        payload['sender'] = {
-                'company': req_sender['company'],
-                'name': req_sender['name'],
-                'email': req_sender['email'],
-                'phones': {}
-                }
-        # sender phones
-        self.curs_dict.callproc('shp.cdek_sender_phones', [shp_id])
-        req_phones = self.curs_dict.fetchall()
-        payload['sender']['phones'] = []
-        for rec in req_phones:
-            d_rec = dict(rec)
-            payload['sender']['phones'].append(d_rec)
+        payload['sender'] = self._sender(shp_id)
+
         # to
         self.curs_dict.callproc('shp.cdek_to', [shp_id])
         req_to = self.curs_dict.fetchone()
@@ -643,6 +691,43 @@ VALUES (%s, %s)', (shp_id, json_payload))
         payload = {'city_code': city_code}
         return self.api.delivery_points(payload)
 
+    def order_info(self, uuid):
+        """ Get order info via API
+            parse and write info into shp.cdek_preorder_params
+        """
+        info = self.api.cdek_order_uuid(uuid)
+        sts_code = 0
+        cdek_number = None
+        our_number = None
+        self.ret_msg = None
+        for req in info['requests']:
+            logging.debug('req=%s', req)
+            if req['type'] == 'CREATE' and req['state'] == 'SUCCESSFUL':
+                sts_code = 20
+                cdek_number = info["entity"]["cdek_number"]
+                our_number = info["entity"]["number"]
+            if req['type'] == 'CREATE' and req['state'] == 'INVALID':
+                sts_code = 91
+                msg_list = []
+                err_list = req.get('errors')
+                for err in err_list:
+                    msg_list.append(err['message'])
+                self.ret_msg = '/'.join(msg_list)
+
+        if sts_code != 0:
+            # update shp.cdek_preorder_params
+            upd_sql = self.curs.mogrify(UPD_SQL, (sts_code, self.api.status_code,
+                                                uuid,
+                                                cdek_number,
+                                                our_number,
+                                                self.ret_msg,
+                                                uuid)
+                                                )
+            logging.debug('upd_sql=%s', upd_sql)
+            if not self.do_query(upd_sql):
+                logging.error('FAILED upd_sql=%s', upd_sql)
+        return info
+
 if __name__ == '__main__':
     log_app.PARSER.add_argument('--uuid', type=str, help='an order uuid to check status')
     log_app.PARSER.add_argument('--uuid_barcode', type=str, help=\
@@ -670,7 +755,8 @@ if __name__ == '__main__':
 
         # an order info
         if ARGS.uuid:
-            CDEK_RES = CDEK.api.cdek_order_uuid(ARGS.uuid)
+            #CDEK_RES = CDEK.api.cdek_order_uuid(ARGS.uuid)
+            CDEK_RES = CDEK.order_info(ARGS.uuid)
         if ARGS.cdek_number:
             CDEK_RES = CDEK.api.cdek_order_cdek_number(ARGS.cdek_number)
         if ARGS.im_number:
@@ -688,6 +774,7 @@ if __name__ == '__main__':
 
         if ARGS.shp:
             CDEK_RES = CDEK.cdek_shp(ARGS.shp)
+            print(CDEK_RES['entity']['uuid'])
 
         if ARGS.calc:
             CDEK_RES = CDEK.calc_tariff(ARGS.calc)
