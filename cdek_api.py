@@ -573,12 +573,14 @@ VALUES (%s, %s)', (shp_id, json_payload))
         # packages
         payload['packages'] = self._packages(shp_id)
         # insurance
+        """ moved to self._packages
         self.total_sum = 0
         self.total_weight = 0
         for pckg in payload['packages']:
             for item in pckg['items']:
                 self.total_sum += item['cost']*item['amount']
                 self.total_weight += item['weight']*item['amount']
+        """
 
         loc_serv = [{'code': 'INSURANCE', 'parameter': str(self.total_sum)}]
         payload['services'] = loc_serv
@@ -620,25 +622,45 @@ VALUES (%s, %s)', (shp_id, json_payload))
         self.curs_dict.callproc('shp.cdek_packages', [shp_id])
         req_packages = self.curs_dict.fetchall()
         logging.debug('len(req_packages)=%s', len(req_packages))
+        logging.debug('req_packages=%s', req_packages)
         boxes = len(req_packages)
 
         loc_packages = []
+        self.total_sum = 0
+        self.total_weight = 0
+
+        # get full list of items
+        self.curs_dict.callproc('shp.cdek_package_items', [shp_id])
+        req_items = self.curs_dict.fetchall()
+        for item in req_items:
+            self.total_sum += item['cost']*item['amount']
+            # WRONG! Must be a weight of boxes
+            # self.total_weight += item['weight']*item['amount']
+
         for idx, rec in enumerate(req_packages):
+            #self.total_weight += rec['weight']
             d_rec = dict(rec)
             logging.debug('type(rec)=%s, d_rec=%s', type(rec), d_rec)
             d_rec.update({'items': []})
-            if boxes == 1:  # для одной коробки реальная опись
-                self.curs_dict.callproc('shp.cdek_package_items', [shp_id])
-            else:
+
+            if boxes > 1:  # для неск коробок виртуальные приборы
                 self.curs_dict.callproc('shp.cdek_package_items_virt', [shp_id,
-                    idx, boxes, self.total_sum])
-            req_items = self.curs_dict.fetchall()
+                    idx+1, boxes, self.total_sum, rec['weight']])
+                req_items = self.curs_dict.fetchall()
+                logging.debug('boxes > 1: req_items=%s', req_items)
+
             for item in req_items:
                 d_item = dict(item)
-                d_item['cost'] = float(d_item['cost'])
+                logging.debug('d_item=%s', d_item)
+                d_item['weight'] = rec['weight']
+                d_item['cost'] = float(d_item['cost']*d_item['amount'])
                 d_item['payment'] = {"value": 0}
                 d_rec['items'].append(d_item)
             loc_packages.append(d_rec)
+
+        logging.debug('Calculated self.total_sum=%s, self.total_weight=%s',
+                self.total_sum, self.total_weight)
+
         return loc_packages
 
     def uuid_barcode(self, uuid, prn_format = 'A6'):
