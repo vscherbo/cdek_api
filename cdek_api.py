@@ -653,7 +653,8 @@ VALUES (%s, %s)', (shp_id, json_payload))
                 d_item = dict(item)
                 logging.debug('d_item=%s', d_item)
                 d_item['weight'] = rec['weight']
-                d_item['cost'] = float(d_item['cost']*d_item['amount'])
+                #ERROR!!! d_item['cost'] = float(d_item['cost']*d_item['amount'])
+                d_item['cost'] = float(d_item['cost'])
                 d_item['payment'] = {"value": 0}
                 d_rec['items'].append(d_item)
             loc_packages.append(d_rec)
