@@ -456,6 +456,32 @@ VALUES (%s, %s)', (shp_id, json_payload))
 
         return ret_sender
 
+    def _recipient(self, shp_id):
+        # recipient
+        self.curs_dict.callproc('shp.cdek_recipient', [shp_id])
+        req_recipient = self.curs_dict.fetchone()
+        ret_recipient = {
+                'company': req_recipient['company'],
+                'name': req_recipient['name'],
+                'email': req_recipient['email'],
+                'passport_series': req_recipient['passport_series'],
+                'passport_number': req_recipient['passport_number'],
+                'passport_date_of_issue': req_recipient['passport_date_of_issue'],
+                'passport_organization': req_recipient['passport_organization'],
+                'inn': req_recipient['inn'],
+                'phones': {}
+                }
+        # recipient phones
+        self.curs_dict.callproc('shp.cdek_recipient_phones', [shp_id])
+        req_phones = self.curs_dict.fetchall()
+        phones = []
+        for rec in req_phones:
+            d_rec = dict(rec)
+            phones.append(d_rec)
+        ret_recipient['phones'] = phones
+        logging.debug('ret_recipient=%s', ret_recipient)
+        return ret_recipient
+
     def cdek_shp(self, shp_id):
         """ Создаёт заказ для отправки с shp_id
         """
@@ -482,7 +508,10 @@ VALUES (%s, %s)', (shp_id, json_payload))
             payload['delivery_point'] = req_to[0]
         elif payload['tariff_code'] in (137, 139):  # to DVER`
             payload['to_location'] = {"address": req_to[0]}
+
         # recipient
+        payload['recipient'] = self._recipient(shp_id)
+        """
         self.curs_dict.callproc('shp.cdek_recipient', [shp_id])
         req_recipient = self.curs_dict.fetchone()
         payload['recipient'] = {
@@ -503,14 +532,13 @@ VALUES (%s, %s)', (shp_id, json_payload))
         for rec in req_phones:
             d_rec = dict(rec)
             payload['recipient']['phones'].append(d_rec)
+        """
 
         payload['packages'] = self._packages(shp_id)
-
         payload['delivery_recipient_cost'] = self._delivery_cost(shp_id)
 
         logging.debug('cdek_shp: payload=%s', json.dumps(payload, ensure_ascii=False, indent=4))
         # INSERT INTO shp.cdek_preorder_params
-        # DEBUG
         self._save_params(shp_id, payload)
         # UPDATE будет в триггере на cdek_order_status
         loc_res = self.api.cdek_create_order(payload)
