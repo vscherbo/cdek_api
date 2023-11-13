@@ -462,20 +462,6 @@ VALUES (%s, %s)', (shp_id, json_payload))
         payload = {}
         payload['type'] = 1  # интернет-магазин (ИМ)
         payload['number'] = shp_id  # Номер заказа в ИС Клиента
-        """
-        bills_select = self.curs_dict.mogrify(
-                'SELECT bill::varchar FROM shp.ship_bills WHERE shp_id = %s',
-                (shp_id,)
-                )
-        logging.debug('bills_select=%s', bills_select)
-        if self.run_query(bills_select, dict_mode=True) == 0:
-            req_bills = self.curs_dict.fetchall()
-            logging.debug('req_bills=%s', req_bills)
-            payload['comment'] = ', '.join([','.join(bill) for bill in req_bills])
-        else:
-            payload['comment'] = f'отправка {shp_id}'
-        """
-
         payload['comment'] = self._comment(shp_id)
 
         # tarif
@@ -553,34 +539,13 @@ VALUES (%s, %s)', (shp_id, json_payload))
             self.curs_dict.callproc('shp.cdek_pvz_addr', [req_to[0]])
             req_pvz = self.curs_dict.fetchone()
             payload['to_location'] = {"address": req_pvz[0]}
-            #payload['to_location'] = {"code": req_pvz[0]}
 
-            """ DEBUG
-            payload['to_location'] = {#"code": req_pvz[0],
-                    "city": 'Санкт-Петербург',
-                    "address": 'пр-т Гражданский, 84 , пом36Н'
-                    #"address": "ул. Тележная, 9  пом 5Н"
-                    #
-                    #"city": "Кингисепп",
-                    #"city_code": 138,
-                    #"address": "пр. Карла Маркса, 39"
-                    }
-            """
         else:
             #payload['to_location'] = {"code": req_pvz[0]}
             payload['to_location'] = {"address": req_to[0]}
 
         # packages
         payload['packages'] = self._packages(shp_id)
-        # insurance
-        """ moved to self._packages
-        self.total_sum = 0
-        self.total_weight = 0
-        for pckg in payload['packages']:
-            for item in pckg['items']:
-                self.total_sum += item['cost']*item['amount']
-                self.total_weight += item['weight']*item['amount']
-        """
 
         loc_serv = [{'code': 'INSURANCE', 'parameter': str(self.total_sum)}]
         payload['services'] = loc_serv
@@ -607,7 +572,6 @@ VALUES (%s, %s)', (shp_id, json_payload))
                 logging.debug('loc_cost=%s', loc_cost)
                 res = {
                     'value': loc_cost["total_sum"],
-                    # BAD 'value': loc_cost["delivery_sum"],
                     #'vat_sum': 0,  !!!T0DO
                     #'vat_rate': None
                 }
@@ -653,7 +617,6 @@ VALUES (%s, %s)', (shp_id, json_payload))
                 d_item = dict(item)
                 logging.debug('d_item=%s', d_item)
                 d_item['weight'] = rec['weight']
-                #ERROR!!! d_item['cost'] = float(d_item['cost']*d_item['amount'])
                 d_item['cost'] = float(d_item['cost'])
                 d_item['payment'] = {"value": 0}
                 d_rec['items'].append(d_item)
