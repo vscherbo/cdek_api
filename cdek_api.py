@@ -7,6 +7,7 @@ Base class for api.cdek.ru
 #import sys
 from datetime import datetime
 from datetime import timedelta
+#import time
 import logging
 import json
 from psycopg2.extras import Json
@@ -200,16 +201,21 @@ class CdekAPI():
 
     def print_barcode(self, payload):
         """ Request to create barcode for the order with uuid
+        Args:
+            payload - должен быть сформирован в вызывающей процедуре,
+            т.о. может содержать не один, а список заказов
         """
         return self.cdek_req(self._url_print_barcodes, payload)
 
     def get_barcode(self, uuid):
-        """ Request to get url for downloading barcode by the uuid
+        """ Request to get url for downloading barcode by the order's uuid
         """
         return self.cdek_req(f'{self._url_print_barcodes}/{uuid}', None, method='GET')
 
     def dl_barcode(self, uuid):
         """ Download PDF from the url
+        Args:
+            uuid - barcode uuid, not the order uuid
         """
         return self.cdek_req(f'{self._url_print_barcodes}/{uuid}.pdf', None, method='GET')
 
@@ -358,15 +364,16 @@ class CDEKApp(PGapp, log_app.LogApp):
             payload['size'] = size
         return self.api.cdek_req(self.api.url_regions, payload, 'GET')
 
-    def _save_params(self, shp_id, payload):
+    def _save_params(self, shp_id, payload, firm):
         """ Save prorder params to PG
         """
         json_payload = Json(payload, dumps=dumps_utf8)
 
         # add ON CONFLICT
         params_ins = self.curs.mogrify(
-                'INSERT INTO shp.cdek_preorder_params(shp_id, payload)\
-VALUES (%s, %s)', (shp_id, json_payload))
+                'INSERT INTO shp.cdek_preorder_params(shp_id, payload, our_firm)\
+VALUES (%s, %s, %s)', (shp_id, json_payload, firm))
+        # ???UIDX on shp_id, ON CONFLICT DO NOTHING???
         logging.debug('params_ins=%s', params_ins)
         if not self.do_query(params_ins):
             logging.error('FAILED params_ins=%s', params_ins)
@@ -482,7 +489,7 @@ VALUES (%s, %s)', (shp_id, json_payload))
         logging.debug('ret_recipient=%s', ret_recipient)
         return ret_recipient
 
-    def cdek_shp(self, shp_id):
+    def cdek_shp(self, shp_id, firm):
         """ Создаёт заказ для отправки с shp_id
         """
         payload = {}
@@ -539,7 +546,7 @@ VALUES (%s, %s)', (shp_id, json_payload))
 
         logging.debug('cdek_shp: payload=%s', json.dumps(payload, ensure_ascii=False, indent=4))
         # INSERT INTO shp.cdek_preorder_params
-        self._save_params(shp_id, payload)
+        self._save_params(shp_id, payload, firm)
         # UPDATE будет в триггере на cdek_order_status
         loc_res = self.api.cdek_create_order(payload)
         self._parse_answer(shp_id, loc_res)
@@ -655,7 +662,7 @@ VALUES (%s, %s)', (shp_id, json_payload))
 
         return loc_packages
 
-    def uuid_barcode(self, uuid, prn_format = 'A6'):
+    def uuid_barcode(self, uuid, prn_format = 'A7'):
         """ Метод используется для формирования ШК места в формате pdf к заказу
         /заказам (TOD0)
         """
@@ -671,7 +678,7 @@ VALUES (%s, %s)', (shp_id, json_payload))
         logging.debug('payload=%s', json.dumps(payload, ensure_ascii=False, indent=4))
         return self.api.print_barcode(payload)
 
-    def cdek_num_barcode(self, cdek_num, prn_format = 'A6'):
+    def cdek_num_barcode(self, cdek_num, prn_format = 'A7'):
         """ Метод используется для формирования ШК места в формате pdf к заказу
         /заказам (TOD0)
         """
@@ -687,11 +694,32 @@ VALUES (%s, %s)', (shp_id, json_payload))
         logging.debug('payload=%s', json.dumps(payload, ensure_ascii=False, indent=4))
         return self.api.print_barcode(payload)
 
+    def request_barcode(self, uuid):
+        """ Запрашивает формирование ШК
+        и записывает полученный uuid ШК в PG cdek_preorder_params
+        Далее скачать можно по получении webhook в таблице cdek_print_form
+        """
+        #??? resp = self.api.get_barcode(uuid)
+        resp = self.uuid_barcode(uuid)
+        barcode_upd = self.curs.mogrify('UPDATE cdek_preorder_params SET barcode_uuid = %s \
+WHERE cdek_uuid = %s', (resp['entity']['uuid'], uuid))
+        logging.debug('barcode_upd=%s', barcode_upd)
+        if self.do_query(barcode_upd, reconnect=True):
+            pass
+        else:
+            logging.error('Error with update cdek_preorder_params.barcode_uuid')
+        return resp
+
+
     def download_barcode(self, uuid, filename=None):
         """ Метод используется для формирования ШК места в формате pdf к заказу
         /заказам (TOD0)
+        Args:
+            uuid - barcode uuid
         """
         loc_res = True
+        #resp = self.api.get_barcode(uuid)
+        #time.sleep(3)
         resp = self.api.dl_barcode(uuid)
         if filename is None:
             filename = f'{uuid}.pdf'
@@ -746,6 +774,8 @@ if __name__ == '__main__':
     log_app.PARSER.add_argument('--uuid', type=str, help='an order uuid to check status')
     log_app.PARSER.add_argument('--uuid_barcode', type=str, help=\
 'an order uuid to print a barcode')
+    log_app.PARSER.add_argument('--req_barcode', type=str, help=\
+'an order uuid to request a barcode')
     log_app.PARSER.add_argument('--cdek_num_barcode', type=int, help=\
 'an order cdek_number to print a barcode')
     log_app.PARSER.add_argument('--get_barcode', type=str, help=\
@@ -756,7 +786,10 @@ if __name__ == '__main__':
 'an order cdek_number to check status')
     log_app.PARSER.add_argument('--im_number', type=str, help='an order im_number to check status')
     log_app.PARSER.add_argument('--demoshp', type=str, help='a shp_id to create an order')
+
     log_app.PARSER.add_argument('--shp', type=int, help='a shp_id to create an order')
+    log_app.PARSER.add_argument('--firm', type=str, help='our firm-sender')
+
     log_app.PARSER.add_argument('--calc', type=int, help='a shp_id to calculate a shipment cost')
     log_app.PARSER.add_argument('--hooks', type=int, help='webhooks list')
     log_app.PARSER.add_argument('--wh_type', type=str, help='a webhook type to register')
@@ -787,7 +820,7 @@ if __name__ == '__main__':
             CDEK_RES = CDEK.api.cdek_create_order(payload=DEMO_PAYLOAD)
 
         if ARGS.shp:
-            CDEK_RES = CDEK.cdek_shp(ARGS.shp)
+            CDEK_RES = CDEK.cdek_shp(ARGS.shp, ARGS.firm)
             print(CDEK_RES['entity']['uuid'])
 
         if ARGS.calc:
@@ -802,6 +835,9 @@ if __name__ == '__main__':
 
         if ARGS.hooks:
             CDEK_RES = CDEK.api.cdek_webhook_list()
+
+        if ARGS.req_barcode:
+            CDEK_RES = CDEK.request_barcode(ARGS.req_barcode)
 
         if ARGS.uuid_barcode:
             CDEK_RES = CDEK.uuid_barcode(ARGS.uuid_barcode)

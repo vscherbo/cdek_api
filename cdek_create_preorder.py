@@ -11,13 +11,13 @@ def main():
     """
     Just main proc
     """
-    #cdek_api.log_app.PARSER.add_argument('--conf', type=str, required=True, help='conf file')
-    #??? cdek_api.log_app.PARSER.set_required('--conf', type=str, required=True, help='conf file')
+    cdek_api.log_app.PARSER.add_argument('--firm', type=str, required=True,
+            help='our firm-sender')
     cdek_api.log_app.PARSER.add_argument('--shp', type=int, required=True,
             help='a shp_id to create an order')
     args = cdek_api.log_app.PARSER.parse_args()
     cdek = cdek_api.CDEKApp(args=args)
-    cdek_res = cdek.cdek_shp(args.shp)
+    cdek_res = cdek.cdek_shp(args.shp, args.firm)
     logging.debug('cdek_res=%s', json.dumps(cdek_res, ensure_ascii=False, indent=4))
     if cdek.ret_msg is not None:
         logging.error(cdek.ret_msg)
