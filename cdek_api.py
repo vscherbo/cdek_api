@@ -23,6 +23,13 @@ import log_app
 DT_FORMAT = '"%d.%m.%Y %H:%M:%S"'
 TS_FORMAT = '%Y%m%d_%H%M%S'
 
+FIRM_LAT = {'АРКОМ': 'ARCOM',
+            'КИПСПБ': 'KIPSPB',
+            'ЭТК': 'ETK',
+            'ОСЗ': 'OSZ',
+            'api': 'API'
+           }
+
 dumps_utf8 = lambda x: json.dumps(x, ensure_ascii=False)
 
 class CdekAPI():
@@ -494,7 +501,7 @@ VALUES (%s, %s, %s)', (shp_id, json_payload, firm))
         """
         payload = {}
         payload['type'] = 1  # интернет-магазин (ИМ)
-        payload['number'] = shp_id  # Номер заказа в ИС Клиента
+        payload['number'] = f'{shp_id}_{FIRM_LAT[firm]}'  # Номер заказа в ИС Клиента
         payload['comment'] = self._comment(shp_id)
 
         # tarif
