@@ -144,13 +144,13 @@ class CdekAPI():
                               params=payload,  # Ok for GET regions
                               json=payload,
                               headers=self.headers)
+            resp.raise_for_status()
             self.status_code = resp.status_code
-            #logging.debug("resp=%s", resp.text)
             logging.debug("resp.url=%s", resp.url)
             self.err_msg = None
             logging.debug("self.status_code=%s", self.status_code)
             #self.payload.clear()
-            resp.raise_for_status()
+            #resp.raise_for_status()
         except requests.exceptions.Timeout as exc:
             # Maybe set up for a retry, or continue in a retry loop
             self.err_msg = self.__exception_fmt__('Timeout', exc)
@@ -167,14 +167,17 @@ class CdekAPI():
                 ret = resp.json()
             except requests.exceptions.JSONDecodeError:
                 ret = resp
-            # logging.debug("r.text=%s", r.text)
         finally:
             if self.err_msg:
-                logging.error(self.err_msg)
+                try:
+                    logging.error(self.err_msg)
+                except requests.exceptions.JSONDecodeError:
+                    logging.debug(resp)
                 ret = {}
                 if resp is not None:
-                    logging.debug(resp.json())
-                    ret = resp.json()
+                    #logging.debug(resp.json())
+                    #ret = resp.json()
+                    ret = {}
             #elif status_code not in (200, 202):  # if not, than HTTPError
                 logging.error("cdek_req %s failed, self.status_code=%s",
                               method,
@@ -256,7 +259,7 @@ class CdekAPI():
 DEMO_PAYLOAD = {
     "type": 1,  # интернет-магазин
     # "tariff_code": 482,  # для type:2 - 482: С-Д, 483: С-С
-    "tariff_code": 137,  # для type:1 - 136: С-С, 137: С-Д, 138: Д-С, 139: Д-Д
+    "tariff_code": 137,  # M для type:1 - 136: С-С, 137: С-Д, 138: Д-С, 139: Д-Д
     "comment": "Новый заказ",
     "number": 123,  # shp_id
     # "shipment_point": "SPB9", заранее не указать, выбор водителя
@@ -333,12 +336,66 @@ DEMO_PAYLOAD = {
 """
 
 UPD_SENT_SQL = 'UPDATE shp.cdek_preorder_params \
-SET sts_code=%s, ret_code=%s, cdek_uuid=%s, ret_msg=%s WHERE shp_id = %s;'
+SET sts_code=%s, ret_code=%s, cdek_uuid=%s, ret_msg=%s WHERE shp_id = %s \
+AND cdek_uuid IS NULL;'
 
 UPD_SQL = 'UPDATE shp.cdek_preorder_params \
 SET sts_code=%s, ret_code=%s, cdek_uuid=%s, cdek_number=%s, our_number=%s, ret_msg=%s \
 WHERE cdek_uuid = %s;'
 #SET sts_code=%s, cdek_number=%s, cdek_uuid=%s, our_number=%s WHERE shp_id = %s;'
+
+ERR_REASON = {}
+ERR_REASON['tarfiff_code'] = 'Код тарифа'
+ERR_REASON['from_address'] = 'Адрес отправителя'
+ERR_REASON['delivery_point'] = 'ПВЗ назначения'
+ERR_REASON['to_address'] = 'Адрес назначения'
+ERR_REASON['calc_address'] = 'Адрес назначения для расчёта'
+ERR_REASON['recipient_name'] = 'Имя получателя'
+ERR_REASON['recipient_phone'] = 'Телефон получателя'
+
+def make_msg(params):
+    """
+    returns error message for user
+    """
+    return 'Отсутствуют обязательные значения: ' + '/'.join(params)
+
+def verify_required(payload, mode='preorder'):
+    """ Проверяет, что обязательные поля заполнены
+    payload['tariff_code']
+    payload['from_location']['address']
+    if payload['tariff_code'] in (136, 138):  # to SKLAD
+        payload['delivery_point'] = req_to[0]
+    elif payload['tariff_code'] in (137, 139):  # to DVER`
+        payload['to_location'] = {"address": req_to[0]}
+    payload['recipient']['name']
+    payload['recipient']['phones'][0]['number']
+    payload['packages']
+    payload['packages']
+    payload['packages']
+    """
+    err_params = []
+    if payload['tariff_code'] is None:
+        err_params.append(ERR_REASON['tariff_code'])
+    if payload['from_location']['address'] is None:
+        err_params.append(ERR_REASON['from_address'])
+
+    if mode == 'calc_tariff':
+        if payload['to_location']['address'] is None:
+            err_params.append(ERR_REASON['calc_address'])
+
+    if mode == 'preorder':  # для calc_tariff не нужно проверять
+        # to SKLAD
+        if payload['tariff_code'] in (136, 138) and payload.get('delivery_point') is None:
+            err_params.append(ERR_REASON['delivery_point'])
+        # to DVER`
+        if payload['tariff_code'] in (137, 139) and payload.get('to_location') is None:
+            err_params.append(ERR_REASON['to_address'])
+        if payload['recipient']['name'] is None:
+            err_params.append(ERR_REASON['recipient_name'])
+        if payload['recipient']['phones'][0]['number'] is None:
+            err_params.append(ERR_REASON['recipient_phone'])
+
+    return err_params
 
 class CDEKApp(PGapp, log_app.LogApp):
     """ An CDEK app
@@ -375,15 +432,24 @@ class CDEKApp(PGapp, log_app.LogApp):
         """ Save prorder params to PG
         """
         json_payload = Json(payload, dumps=dumps_utf8)
+        ret_msg = None
+        err_params = verify_required(payload)
+        if len(err_params) == 0:
+            ret_msg = None
+        else:
+            ret_msg = make_msg(err_params)
 
         # add ON CONFLICT
         params_ins = self.curs.mogrify(
-                'INSERT INTO shp.cdek_preorder_params(shp_id, payload, our_firm)\
-VALUES (%s, %s, %s)', (shp_id, json_payload, firm))
+                'INSERT INTO shp.cdek_preorder_params(shp_id, ret_msg, payload, our_firm)\
+VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
         # ???UIDX on shp_id, ON CONFLICT DO NOTHING???
         logging.debug('params_ins=%s', params_ins)
         if not self.do_query(params_ins):
-            logging.error('FAILED params_ins=%s', params_ins)
+            ret_msg = f'FAILED INSERT INTO shp.cdek_preorder_params, shp_id={shp_id}'
+            logging.error(ret_msg)
+
+        return ret_msg
 
     def _parse_answer(self, shp_id, res):
         """ Parse API answer
@@ -434,6 +500,7 @@ VALUES (%s, %s, %s)', (shp_id, json_payload, firm))
     def _from(self, shp_id, tariff_code):
         """ Returns 'from' field for preorder
         """
+        ret_from = None
         self.curs_dict.callproc('shp.cdek_from', [shp_id])
         req_from = self.curs_dict.fetchone()
         if tariff_code in (136, 137):  # from SKLAD
@@ -496,6 +563,8 @@ VALUES (%s, %s, %s)', (shp_id, json_payload, firm))
         logging.debug('ret_recipient=%s', ret_recipient)
         return ret_recipient
 
+
+
     def cdek_shp(self, shp_id, firm):
         """ Создаёт заказ для отправки с shp_id
         """
@@ -525,38 +594,46 @@ VALUES (%s, %s, %s)', (shp_id, json_payload, firm))
 
         # recipient
         payload['recipient'] = self._recipient(shp_id)
-        """
-        self.curs_dict.callproc('shp.cdek_recipient', [shp_id])
-        req_recipient = self.curs_dict.fetchone()
-        payload['recipient'] = {
-                'company': req_recipient['company'],
-                'name': req_recipient['name'],
-                'email': req_recipient['email'],
-                'passport_series': req_recipient['passport_series'],
-                'passport_number': req_recipient['passport_number'],
-                'passport_date_of_issue': req_recipient['passport_date_of_issue'],
-                'passport_organization': req_recipient['passport_organization'],
-                'inn': req_recipient['inn'],
-                'phones': {}
-                }
-        # recipient phones
-        self.curs_dict.callproc('shp.cdek_recipient_phones', [shp_id])
-        req_phones = self.curs_dict.fetchall()
-        payload['recipient']['phones'] = []
-        for rec in req_phones:
-            d_rec = dict(rec)
-            payload['recipient']['phones'].append(d_rec)
-        """
 
         payload['packages'] = self._packages(shp_id)
         payload['delivery_recipient_cost'] = self._delivery_cost(shp_id)
+        if payload['delivery_recipient_cost'] is None: # Оплата Мы
+            loc_res = self._cre_order(shp_id, payload, firm)
+            ret_msg = None
+        else:
+            ret_msg = payload['delivery_recipient_cost'].get('ret_msg')
+            if ret_msg is None:
+                loc_res = self._cre_order(shp_id, payload, firm)
+                """
+                logging.debug('cdek_shp: payload=%s', json.dumps(payload, \
+                        ensure_ascii=False, indent=4))
+                # INSERT INTO shp.cdek_preorder_params
+                ret_msg = self._save_params(shp_id, payload, firm)
+                if ret_msg is None:
+                    # UPDATE будет в триггере на cdek_order_status только для CREATED
+                    loc_res = self.api.cdek_create_order(payload)
+                    self._parse_answer(shp_id, loc_res)
+                else:
+                    loc_res = {'ret_msg': ret_msg}
+                """
+            else:
+                loc_res = {'ret_msg': ret_msg}
+        self.ret_msg = ret_msg
+        return loc_res
+
+    def _cre_order(self, shp_id, payload, firm):
+        """ Save params and call API to create an order
+        """
 
         logging.debug('cdek_shp: payload=%s', json.dumps(payload, ensure_ascii=False, indent=4))
         # INSERT INTO shp.cdek_preorder_params
-        self._save_params(shp_id, payload, firm)
-        # UPDATE будет в триггере на cdek_order_status
-        loc_res = self.api.cdek_create_order(payload)
-        self._parse_answer(shp_id, loc_res)
+        ret_msg = self._save_params(shp_id, payload, firm)
+        if ret_msg is None:
+            # UPDATE будет в триггере на cdek_order_status только для CREATED
+            loc_res = self.api.cdek_create_order(payload)
+            self._parse_answer(shp_id, loc_res)
+        else:
+            loc_res = {'ret_msg': ret_msg}
         return loc_res
 
     def calc_tariff(self, shp_id):
@@ -581,7 +658,6 @@ VALUES (%s, %s, %s)', (shp_id, json_payload, firm))
             self.curs_dict.callproc('shp.cdek_pvz_addr', [req_to[0]])
             req_pvz = self.curs_dict.fetchone()
             payload['to_location'] = {"address": req_pvz[0]}
-
         else:
             #payload['to_location'] = {"code": req_pvz[0]}
             payload['to_location'] = {"address": req_to[0]}
@@ -594,7 +670,18 @@ VALUES (%s, %s, %s)', (shp_id, json_payload, firm))
         logging.debug('payload=%s', json.dumps(payload, ensure_ascii=False,
                                                sort_keys=True,
                                                indent=4))
-        return self.api.calc_tariff(payload)
+
+        err_params = verify_required(payload, 'calc_tariff')
+        if len(err_params) == 0:
+            ret_msg = None
+        else:
+            ret_msg = make_msg(err_params)
+        if ret_msg is None:
+            loc_res = self.api.calc_tariff(payload)
+        else:
+            loc_res = {'ret_msg': ret_msg}
+
+        return loc_res
 
     def _delivery_cost(self, shp_id):
         """ Returns values for payload['delivery_recipient_cost']
@@ -612,11 +699,15 @@ VALUES (%s, %s, %s)', (shp_id, json_payload, firm))
                 logging.debug('ОтгрузкаОплата = Они, рассчитываем стоимость')
                 loc_cost = self.calc_tariff(shp_id)
                 logging.debug('loc_cost=%s', loc_cost)
-                res = {
-                    'value': loc_cost["total_sum"],
-                    #'vat_sum': 0,  !!!T0DO
-                    #'vat_rate': None
-                }
+                ret_msg = loc_cost.get('ret_msg')
+                if ret_msg is None:
+                    res = {
+                        'value': loc_cost.get("total_sum"),
+                        #'vat_sum': 0,  !!!T0DO
+                        #'vat_rate': None
+                    }
+                else:
+                    res = {'ret_msg': ret_msg}
         else:
             logging.warning('req_wepay NOT FOUND for shp_id=%s', shp_id)
         return res
@@ -658,6 +749,7 @@ VALUES (%s, %s, %s)', (shp_id, json_payload, firm))
             for item in req_items:
                 d_item = dict(item)
                 logging.debug('d_item=%s', d_item)
+                d_item['name'] = d_item['name'].replace('"','\\"')
                 d_item['weight'] = rec['weight']
                 d_item['cost'] = float(d_item['cost'])
                 d_item['payment'] = {"value": 0}
@@ -828,7 +920,10 @@ if __name__ == '__main__':
 
         if ARGS.shp:
             CDEK_RES = CDEK.cdek_shp(ARGS.shp, ARGS.firm)
-            print(CDEK_RES['entity']['uuid'])
+            try:
+                print(CDEK_RES['entity']['uuid'])
+            except KeyError:
+                print('Обращения к СДЭК API не было')
 
         if ARGS.calc:
             CDEK_RES = CDEK.calc_tariff(ARGS.calc)
@@ -847,7 +942,7 @@ if __name__ == '__main__':
             CDEK_RES = CDEK.request_barcode(ARGS.req_barcode)
 
         if ARGS.uuid_barcode:
-            CDEK_RES = CDEK.uuid_barcode(ARGS.uuid_barcode)
+            CDEK_RES = CDEK.uuid_barcode(ARGS.uuid_barcode, prn_format='A4')
 
         if ARGS.cdek_num_barcode:
             CDEK_RES = CDEK.cdek_num_barcode(ARGS.cdek_num_barcode)
