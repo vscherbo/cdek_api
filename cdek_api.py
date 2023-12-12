@@ -657,9 +657,9 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
         if payload['tariff_code'] in (136, 138):  # до Склада
             self.curs_dict.callproc('shp.cdek_pvz_addr', [req_to[0]])
             req_pvz = self.curs_dict.fetchone()
-            payload['to_location'] = {"address": req_pvz[0]}
+            payload['to_location'] = {"address": req_pvz[0],
+                    "postal_code": req_pvz[0].split(',')[0]}
         else:
-            #payload['to_location'] = {"code": req_pvz[0]}
             payload['to_location'] = {"address": req_to[0]}
 
         # packages
