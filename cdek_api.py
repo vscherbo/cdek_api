@@ -429,7 +429,7 @@ class CDEKApp(PGapp, log_app.LogApp):
         return self.api.cdek_req(self.api.url_regions, payload, 'GET')
 
     def _save_params(self, shp_id, payload, firm):
-        """ Save prorder params to PG
+        """ Save preorder params to PG
         """
         json_payload = Json(payload, dumps=dumps_utf8)
         ret_msg = None
@@ -625,7 +625,7 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
         """ Save params and call API to create an order
         """
 
-        logging.debug('cdek_shp: payload=%s', json.dumps(payload, ensure_ascii=False, indent=4))
+        logging.debug('payload=%s', json.dumps(payload, ensure_ascii=False, indent=4))
         # INSERT INTO shp.cdek_preorder_params
         ret_msg = self._save_params(shp_id, payload, firm)
         if ret_msg is None:
@@ -749,7 +749,8 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
             for item in req_items:
                 d_item = dict(item)
                 logging.debug('d_item=%s', d_item)
-                d_item['name'] = d_item['name'].replace('"','\\"')
+                # in cdek_package_items()
+                # d_item['name'] = d_item['name'].replace('"','\"')
                 d_item['weight'] = rec['weight']
                 d_item['cost'] = float(d_item['cost'])
                 d_item['payment'] = {"value": 0}
