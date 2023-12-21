@@ -1,4 +1,4 @@
-DROP FUNCTION shp.cdek_package_items(integer);
+-- DROP FUNCTION shp.cdek_package_items(integer);
 
 CREATE OR REPLACE FUNCTION shp.cdek_package_items(arg_shp_id integer)
 RETURNS TABLE (
@@ -16,7 +16,10 @@ if arg_shp_id <= 0 then
 else        
     return query 
     select 
-    substring(bc."Наименование", 1, 255)::varchar(255) as "name",
+    -- 1st substring(bc."Наименование", 1, 255)::varchar(255) as "name",
+    -- 2nd substring(replace (bc."Наименование", '"', '\\"'), 1, 255)::varchar(255) as "name",
+    -- PROD substring(quote_literal(bc."Наименование"), 1, 255)::varchar(255) as "name", 
+    substring(trim (both from quote_literal(bc."Наименование"), ''''), 1, 255)::varchar(255) as "name", 
     bc."КодСодержания"::varchar(20) as ware_key, 
     bc."ЦенаНДС"::numeric as cost, 
     coalesce(round(greatest  (c."Нетто" , c."Брутто")::numeric), 100)::integer as weight,
