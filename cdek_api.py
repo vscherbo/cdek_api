@@ -442,6 +442,7 @@ class CDEKApp(PGapp, log_app.LogApp):
             ret_msg = None
         else:
             ret_msg = make_msg(err_params)
+        logging.debug('ret_msg=%s', ret_msg)
 
         # add ON CONFLICT
         params_ins = self.curs.mogrify(
@@ -603,25 +604,18 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
         payload['delivery_recipient_cost'] = self._delivery_cost(shp_id)
         if payload['delivery_recipient_cost'] is None: # Оплата Мы
             loc_res = self._cre_order(shp_id, payload, firm)
-            ret_msg = None
         else:
             ret_msg = payload['delivery_recipient_cost'].get('ret_msg')
             if ret_msg is None:
                 loc_res = self._cre_order(shp_id, payload, firm)
-                """
-                logging.debug('cdek_shp: payload=%s', json.dumps(payload, \
-                        ensure_ascii=False, indent=4))
-                # INSERT INTO shp.cdek_preorder_params
-                ret_msg = self._save_params(shp_id, payload, firm)
-                if ret_msg is None:
-                    # UPDATE будет в триггере на cdek_order_status только для CREATED
-                    loc_res = self.api.cdek_create_order(payload)
-                    self._parse_answer(shp_id, loc_res)
-                else:
-                    loc_res = {'ret_msg': ret_msg}
-                """
+                ####### loc_res["ret_msg"]
             else:
                 loc_res = {'ret_msg': ret_msg}
+
+        if "ret_msg" in loc_res:
+            ret_msg = loc_res["ret_msg"]
+        #else:
+        #    ret_msg = None
         self.ret_msg = ret_msg
         return loc_res
 
@@ -632,12 +626,14 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
         logging.debug('payload=%s', json.dumps(payload, ensure_ascii=False, indent=4))
         # INSERT INTO shp.cdek_preorder_params
         ret_msg = self._save_params(shp_id, payload, firm)
+        logging.debug('ret_msg=%s', ret_msg)
         if ret_msg is None:
             # UPDATE будет в триггере на cdek_order_status только для CREATED
             loc_res = self.api.cdek_create_order(payload)
             self._parse_answer(shp_id, loc_res)
         else:
             loc_res = {'ret_msg': ret_msg}
+            self.ret_msg = ret_msg
         return loc_res
 
     def calc_tariff(self, shp_id):
@@ -826,7 +822,7 @@ WHERE cdek_uuid = %s', (resp['entity']['uuid'], uuid))
         Args:
             uuid - barcode uuid
         """
-        loc_res = True
+        #loc_res = True
         #resp = self.api.get_barcode(uuid)
         #time.sleep(3)
         resp = self.api.dl_barcode(uuid)
@@ -834,7 +830,8 @@ WHERE cdek_uuid = %s', (resp['entity']['uuid'], uuid))
             filename = f'{uuid}.pdf'
         with open(filename, "wb") as barcode_output:
             barcode_output.write(resp.content)
-        return loc_res
+        #return loc_res
+        return resp
 
     def delivery_points(self, city_code):
         """ Метод предназначен для получения списка действующих офисов СДЭК
