@@ -392,7 +392,8 @@ def verify_required(payload, mode='preorder'):
             err_params.append(ERR_REASON['to_address'])
         if payload['recipient']['name'] is None:
             err_params.append(ERR_REASON['recipient_name'])
-        if payload['recipient']['phones'][0]['number'] is None:
+        if len(payload['recipient']['phones']) == 0\
+           or payload['recipient']['phones'][0]['number'] is None:
             err_params.append(ERR_REASON['recipient_phone'])
 
     return err_params
@@ -410,13 +411,16 @@ class CDEKApp(PGapp, log_app.LogApp):
                                       self.config['PG']['pg_user'])
         if self.pg_connect():
             self.set_session(autocommit=True)
-        self.api = CdekAPI(self.config)
-        if self.api:
-            with open(config_filename, 'w', encoding='utf-8') as cfgfile:
-                self.config.write(cfgfile)
-        self.total_sum = 0
-        self.total_weight = 0
-        self.ret_msg = ''
+            self.api = CdekAPI(self.config)
+            if self.api:
+                with open(config_filename, 'w', encoding='utf-8') as cfgfile:
+                    self.config.write(cfgfile)
+            self.total_sum = 0
+            self.total_weight = 0
+            self.ret_msg = ''
+        else:
+            logging.error('No connect to PG')
+            #raise f"Failed to login to {self.config['PG']['pg_host']}"
 
     def cdek_regions(self, page=0, size=10):
         """ Метод предназначен для получения детальной информации о регионах
@@ -657,8 +661,11 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
         if payload['tariff_code'] in (136, 138):  # до Склада
             self.curs_dict.callproc('shp.cdek_pvz_addr', [req_to[0]])
             req_pvz = self.curs_dict.fetchone()
-            payload['to_location'] = {"address": req_pvz[0],
-                    "postal_code": req_pvz[0].split(',')[0]}
+            if req_pvz[0] is not None and req_pvz[0] != 'не определен':
+                payload['to_location'] = {"address": req_pvz[0],
+                        "postal_code": req_pvz[0].split(',')[0]}
+            else:
+                payload['to_location'] = {"address": None}
         else:
             payload['to_location'] = {"address": req_to[0]}
 
@@ -805,7 +812,9 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
 WHERE cdek_uuid = %s', (resp['entity']['uuid'], uuid))
         logging.debug('barcode_upd=%s', barcode_upd)
         if self.do_query(barcode_upd, reconnect=True):
-            pass
+            #pass
+            self.conn.commit()
+            logging.debug('commited! barcode_upd=%s', barcode_upd)
         else:
             logging.error('Error with update cdek_preorder_params.barcode_uuid')
         return resp
