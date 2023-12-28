@@ -1,5 +1,5 @@
 -- DROP FUNCTION shp.cdek_download_barcode(varchar, uuid);
-DROP FUNCTION shp.cdek_download_barcode(uuid, varchar);
+--DROP FUNCTION shp.cdek_download_barcode(uuid, varchar);
 
 CREATE OR REPLACE FUNCTION shp.cdek_download_barcode(
 --    arg_firm varchar,
@@ -26,10 +26,11 @@ ELSE
     loc_filename := arg_filename;
 END IF;
 
-SELECT our_firm INTO loc_firm FROM shp.cdek_preorder_params WHERE
+SELECT our_firm INTO loc_firm FROM shp.cdek_preorder_params
+WHERE
 cdek_number is not null
 AND barcode_uuid = arg_uuid;
-RAISE NOTICE 'loc_firm=%', loc_firm;
+RAISE NOTICE 'shp.cdek_download_barcode: loc_firm=%, arg_uuid=%', loc_firm, arg_uuid;
 IF FOUND AND loc_firm is NOT NULL THEN
     cmd := format('%s/cdek_download_barcode.py --log_file=%s/cdek_download_barcode.log --conf=%s --uuid=%s --outpdf=%s', 
         wrk_dir, -- script dir
@@ -41,7 +42,8 @@ IF FOUND AND loc_firm is NOT NULL THEN
     IF cmd IS NULL 
     THEN 
        err_str := 'cdek_download_barcode cmd IS NULL';
-       RAISE '%', err_str ; 
+       -- ret_str := err_str;
+       RAISE NOTICE '%', err_str ; 
     END IF;
 
     SELECT * FROM public.exec_shell(cmd, wrk_dir) INTO ret_str, err_str ;
@@ -49,11 +51,17 @@ IF FOUND AND loc_firm is NOT NULL THEN
     IF err_str IS NOT NULL
     THEN 
        RAISE NOTICE 'cdek_download_barcode cmd=%^err_str=[%]', cmd, err_str; 
-       ret_str := err_str;
+       -- ret_str := err_str;
     END IF;
 ELSE 
-    ret_str := format('Не найдена фирма-отправитель для uuid ШК=%s', arg_uuid);
+    err_str := format('Не найдена фирма-отправитель для uuid ШК=%s', arg_uuid);
+    RAISE NOTICE '%', err_str;
 END IF;
+
+    IF err_str IS NOT NULL
+    THEN 
+       ret_str := err_str;
+    END IF;
 
     return ret_str;
 END;$BODY$
