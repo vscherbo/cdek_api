@@ -166,7 +166,7 @@ class CdekAPI():
             try:
                 ret = resp.json()
             except requests.exceptions.JSONDecodeError:
-                ret = resp
+                ret = resp  # ??? .text
         finally:
             if self.err_msg:
                 try:
@@ -175,8 +175,7 @@ class CdekAPI():
                     logging.debug(resp)
                 ret = {}
                 if resp is not None:
-                    #logging.debug(resp.json())
-                    #ret = resp.json()
+                    logging.debug('resp.__dict__=%s', resp.__dict__)
                     ret = {}
             #elif status_code not in (200, 202):  # if not, than HTTPError
                 logging.error("cdek_req %s failed, self.status_code=%s",
@@ -602,6 +601,7 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
 
         payload['packages'] = self._packages(shp_id)
         payload['delivery_recipient_cost'] = self._delivery_cost(shp_id)
+        ret_msg = None
         if payload['delivery_recipient_cost'] is None: # Оплата Мы
             loc_res = self._cre_order(shp_id, payload, firm)
         else:
@@ -829,7 +829,12 @@ WHERE cdek_uuid = %s', (resp['entity']['uuid'], uuid))
         if filename is None:
             filename = f'{uuid}.pdf'
         with open(filename, "wb") as barcode_output:
-            barcode_output.write(resp.content)
+            try:
+                barcode_output.write(resp.content)
+            except AttributeError:
+                #logging.error('resp=%s', resp)
+                #logging.error('err=%s', self.api.err_msg)
+                self.ret_msg = self.api.err_msg
         #return loc_res
         return resp
 
