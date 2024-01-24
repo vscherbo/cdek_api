@@ -666,7 +666,7 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
             payload['to_location'] = {"address": req_to[0]}
 
         # packages
-        payload['packages'] = self._packages(shp_id)
+        payload['packages'] = self._packages(shp_id, 'calc')
 
         loc_serv = [{'code': 'INSURANCE', 'parameter': str(self.total_sum)}]
         payload['services'] = loc_serv
@@ -715,7 +715,12 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
             logging.warning('req_wepay NOT FOUND for shp_id=%s', shp_id)
         return res
 
-    def _packages(self, shp_id):
+    def test_packages(self, shp_id, mode='order'):
+        """ non protected
+        """
+        return self._packages(shp_id, mode)
+
+    def _packages(self, shp_id, mode='order'):
         """ Returens list of packages
         """
         # boxes = packages
@@ -749,15 +754,19 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
                 req_items = self.curs_dict.fetchall()
                 logging.debug('boxes > 1: req_items=%s', req_items)
 
-            for item in req_items:
-                d_item = dict(item)
-                logging.debug('d_item=%s', d_item)
-                # in cdek_package_items()
-                # d_item['name'] = d_item['name'].replace('"','\"')
-                d_item['weight'] = rec['weight']
-                d_item['cost'] = float(d_item['cost'])
-                d_item['payment'] = {"value": 0}
-                d_rec['items'].append(d_item)
+            if mode == 'order':
+                for item in req_items:
+                    d_item = dict(item)
+                    logging.debug('d_item=%s', d_item)
+                    # in cdek_package_items()
+                    # d_item['name'] = d_item['name'].replace('"','\"')
+                    d_item['weight'] = rec['weight']
+                    d_item['cost'] = float(d_item['cost'])
+                    d_item['payment'] = {"value": 0}
+                    d_rec['items'].append(d_item)
+            elif mode == 'calc':
+                d_rec.pop('items')
+                d_rec.pop('number')
             loc_packages.append(d_rec)
 
         logging.debug('Calculated self.total_sum=%s, self.total_weight=%s',
@@ -906,6 +915,7 @@ if __name__ == '__main__':
     log_app.PARSER.add_argument('--wh_type', type=str, help='a webhook type to register')
     log_app.PARSER.add_argument('--city_code', type=str,
             help='List of delivery points in city_code')
+    log_app.PARSER.add_argument('--pck', type=int)
     ARGS = log_app.PARSER.parse_args()
     CDEK = CDEKApp(args=ARGS)
     if CDEK:
@@ -970,6 +980,9 @@ if __name__ == '__main__':
 
         if ARGS.city_code:
             CDEK_RES = CDEK.delivery_points(ARGS.city_code)
+
+        if ARGS.pck:
+            CDEK_RES = CDEK.test_packages(ARGS.pck, 'calc')
 
         logging.debug('CDEK_RES=%s', json.dumps(CDEK_RES, ensure_ascii=False, indent=4))
 
