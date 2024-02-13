@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """
 Base class for api.cdek.ru
 """
@@ -26,6 +25,7 @@ TS_FORMAT = '%Y%m%d_%H%M%S'
 FIRM_LAT = {'АРКОМ': 'ARCOM',
             'КИПСПБ': 'KIPSPB',
             'ЭТК': 'ETK',
+            'ЭТК24': 'ETK24',
             'ОСЗ': 'OSZ',
             'api': 'API'
            }
@@ -977,6 +977,7 @@ if __name__ == '__main__':
 
         if ARGS.wh_type:
             CDEK_RES = CDEK.api.cdek_webhook_reg('http://dru.kipspb.ru:8123', ARGS.wh_type)
+            #CDEK_RES = CDEK.api.cdek_webhook_reg('http://ttk-az.kipspb.ru:8123', ARGS.wh_type)
 
         if ARGS.city_code:
             CDEK_RES = CDEK.delivery_points(ARGS.city_code)
