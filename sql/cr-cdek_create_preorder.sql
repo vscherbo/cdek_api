@@ -29,6 +29,8 @@ BEGIN
     THEN 
        RAISE NOTICE 'cdek_create_preorder cmd=%^err_str=[%]', cmd, err_str; 
        ret_str := err_str;
+    ELSE
+       ret_str := '';  -- empty string instead of UUID if OK
     END IF;
     
     return ret_str;
