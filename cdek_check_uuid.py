@@ -1,10 +1,10 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """ Запрос статуса предзаказа СДЭК по uuid
 """
 
 import logging
 import sys
-import json
+#import json
 import cdek_api
 
 def main():
@@ -18,7 +18,7 @@ def main():
     args = cdek_api.log_app.PARSER.parse_args()
     cdek = cdek_api.CDEKApp(args=args)
     cdek_res = cdek.order_info(args.uuid)
-    logging.debug('cdek_res=%s', json.dumps(cdek_res, ensure_ascii=False, indent=4))
+    #logging.debug('cdek_res=%s', json.dumps(cdek_res, ensure_ascii=False, indent=4))
     if cdek.ret_msg is not None:
         logging.error(cdek.ret_msg)
         print(cdek.ret_msg, file=sys.stderr, end='', flush=True)

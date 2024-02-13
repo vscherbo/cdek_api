@@ -16,7 +16,7 @@ def main():
     args = cdek_api.log_app.PARSER.parse_args()
     cdek = cdek_api.CDEKApp(args=args)
     cdek_res = cdek.request_barcode(args.uuid)
-    logging.debug('cdek_res=%s', json.dumps(cdek_res, ensure_ascii=False, indent=4))
+    #logging.debug('cdek_res=%s', json.dumps(cdek_res, ensure_ascii=False, indent=4))
     if cdek.ret_msg is not None and cdek.ret_msg != '':
         logging.error(cdek.ret_msg)
         print(cdek.ret_msg, file=sys.stderr, end='', flush=True)

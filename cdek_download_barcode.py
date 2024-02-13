@@ -18,9 +18,13 @@ def main():
     args = cdek_api.log_app.PARSER.parse_args()
     cdek = cdek_api.CDEKApp(args=args)
     cdek_res = cdek.download_barcode(args.uuid, args.outpdf)
-    logging.debug('cdek_res=%s', json.dumps(cdek_res, ensure_ascii=False, indent=4))
+    #try:
+    #    logging.debug('cdek_res=%s', json.dumps(cdek_res, ensure_ascii=False, indent=4))
+    #except TypeError:
+    #    logging.debug('cdek_res=%s', cdek_res.__dict__)
+
     if cdek.ret_msg is not None and cdek.ret_msg != '':
-        logging.error(cdek.ret_msg)
+        logging.error('cdek.ret_msg=%s', cdek.ret_msg)
         print(cdek.ret_msg, file=sys.stderr, end='', flush=True)
 
 if __name__ == '__main__':
