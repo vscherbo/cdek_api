@@ -1,0 +1,4 @@
+requests==2.27.1
+psycopg2_binary
+git+https://github.com/vscherbo/apps.git
+git+https://github.com/vscherbo/pg_app.git
