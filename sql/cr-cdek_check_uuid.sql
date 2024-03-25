@@ -11,6 +11,13 @@ DECLARE cmd character varying;
   err_str VARCHAR := '';
   wrk_dir text := '/opt/cdek_api';
 BEGIN
+    IF arg_firm IS NULL THEN
+        return 'Входной параметр arg_firm IS NULL';
+    END IF;
+    IF arg_firm = '' THEN
+        return 'Входной параметр arg_firm пустая строка';
+    END IF;
+
     cmd := format('%s/cdek_check_uuid.py --log_file=%s/cdek_check_uuid.log --conf=%s --uuid=%s', 
         wrk_dir, -- script dir
         format('%s/logs', wrk_dir), -- logfile dir
