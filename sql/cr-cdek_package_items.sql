@@ -27,7 +27,7 @@ else
     bc."Кол-во"::integer as amount
     from ship_bills sb 
     join "Содержание счета" bc on bc."№ счета" = sb.bill 
-    join "Содержание" c on c."КодСодержания" = bc."КодСодержания"
+    left join "Содержание" c on c."КодСодержания" = bc."КодСодержания" -- left join позиции без КС, счёт 44281941
     where sb.shp_id = arg_shp_id;
 end if;
 

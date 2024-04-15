@@ -2,22 +2,23 @@
 """
 Base class for api.cdek.ru
 """
-#import os
-#import sys
-from datetime import datetime
-from datetime import timedelta
+import json
 #import time
 import logging
-import json
+#import os
+#import sys
+from datetime import datetime, timedelta
+
+import log_app
+import requests
+from pg_app import PGapp
 from psycopg2.extras import Json
+
 #import re
 
-import requests
 
 #from psycopg2.extras import DictRow
 
-from pg_app import PGapp
-import log_app
 
 DT_FORMAT = '"%d.%m.%Y %H:%M:%S"'
 TS_FORMAT = '%Y%m%d_%H%M%S'
@@ -145,10 +146,9 @@ class CdekAPI():
                               json=payload,
                               headers=self.headers)
             resp.raise_for_status()
-            self.status_code = resp.status_code
+            # self.status_code = resp.status_code  # moved to finally:
             logging.debug("resp.url=%s", resp.url)
             self.err_msg = None
-            logging.debug("self.status_code=%s", self.status_code)
             #self.payload.clear()
             #resp.raise_for_status()
         except requests.exceptions.Timeout as exc:
@@ -162,25 +162,33 @@ class CdekAPI():
         except requests.exceptions.RequestException as exc:
             # catastrophic error. bail.
             self.err_msg = self.__exception_fmt__('RequestException', exc)
-        else:
+        #else:
+        #    try:
+        #        ret = resp.json()
+        #    except requests.exceptions.JSONDecodeError:
+        #        ret = resp  # ??? .text
+        finally:
+            self.status_code = resp.status_code
+            logging.debug("self.status_code=%s", self.status_code)
             try:
                 ret = resp.json()
             except requests.exceptions.JSONDecodeError:
                 ret = resp  # ??? .text
-        finally:
             if self.err_msg:
                 try:
-                    logging.error(self.err_msg)
+                    logging.error('err_msg=%s', self.err_msg)
                 except requests.exceptions.JSONDecodeError:
-                    logging.debug(resp)
-                ret = {}
+                    logging.debug('err_msg is not JSON, resp=%s', resp)
+                #ret = {}
                 if resp is not None:
                     logging.debug('resp.__dict__=%s', resp.__dict__)
-                    ret = {}
+                    logging.debug('resp.text=%s', resp.text)
+                    #ret = {}
             #elif status_code not in (200, 202):  # if not, than HTTPError
                 logging.error("cdek_req %s failed, self.status_code=%s",
                               method,
                               self.status_code)
+                logging.debug("cdek_req failed, self.err_msg=%s", self.err_msg)
 
             if resp is not None:
                 self.text = resp.text
@@ -601,6 +609,7 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
 
         payload['packages'] = self._packages(shp_id)
         payload['delivery_recipient_cost'] = self._delivery_cost(shp_id)
+
         ret_msg = None
         if payload['delivery_recipient_cost'] is None: # Оплата Мы
             loc_res = self._cre_order(shp_id, payload, firm)
@@ -630,7 +639,15 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
         if ret_msg is None:
             # UPDATE будет в триггере на cdek_order_status только для CREATED
             loc_res = self.api.cdek_create_order(payload)
-            self._parse_answer(shp_id, loc_res)
+            #logging.debug('type(loc_res)=%s', type(loc_res))
+            #logging.debug('loc_res=%s', loc_res)
+            if "requests" in loc_res.keys():
+                logging.debug('key "requests" found in the answer')
+                self._parse_answer(shp_id, loc_res)
+            elif "errors" in loc_res.keys():
+                logging.debug('ERRORS: loc_res=%s', loc_res)
+            else:
+                logging.debug('ELSE keys found in the answer=%s', loc_res.keys())
         else:
             loc_res = {'ret_msg': ret_msg}
             self.ret_msg = ret_msg
@@ -655,7 +672,8 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
         self.curs_dict.callproc('shp.cdek_to', [shp_id])
         req_to = self.curs_dict.fetchone()
         if payload['tariff_code'] in (136, 138):  # до Склада
-            self.curs_dict.callproc('shp.cdek_pvz_addr', [req_to[0]])
+            #self.curs_dict.callproc('shp.cdek_pvz_addr', [req_to[0]])
+            self.curs_dict.callproc('shp.cdek_pvz_calc_addr', [req_to[0]])
             req_pvz = self.curs_dict.fetchone()
             if req_pvz[0] is not None and req_pvz[0] != 'не определен':
                 payload['to_location'] = {"address": req_pvz[0],
@@ -681,6 +699,10 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
             ret_msg = make_msg(err_params)
         if ret_msg is None:
             loc_res = self.api.calc_tariff(payload)
+            try:
+                logging.info(loc_res["delivery_sum"])
+            except KeyError:
+                loc_res = {'ret_msg': self.api.err_msg}
         else:
             loc_res = {'ret_msg': ret_msg}
 
@@ -739,6 +761,10 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
         req_items = self.curs_dict.fetchall()
         for item in req_items:
             self.total_sum += item['cost']*item['amount']
+            if item['ware_key'] is None:
+                item['ware_key'] = -1
+            if item['weight'] is None:
+                item['weight'] = 200
             # WRONG! Must be a weight of boxes
             # self.total_weight += item['weight']*item['amount']
 
