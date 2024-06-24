@@ -185,6 +185,7 @@ class CdekAPI():
                     logging.debug('resp.text=%s', resp.text)
                     #ret = {}
             #elif status_code not in (200, 202):  # if not, than HTTPError
+                self.err_msg = self._err_msg(resp.text.get('errors'))
                 logging.error("cdek_req %s failed, self.status_code=%s",
                               method,
                               self.status_code)
@@ -194,6 +195,14 @@ class CdekAPI():
                 self.text = resp.text
 
         return ret
+
+    def _err_msg(self, err_list):
+        """ Returns string with errors text """
+        msg_list = []
+        for err in err_list:
+            msg_list.append(err['message'])
+        ret_msg = '/'.join(msg_list)
+        return ret_msg
 
     #def cdek_create_order(self, **kwargs):
     def cdek_create_order(self, payload):
