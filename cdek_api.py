@@ -5,9 +5,11 @@ Base class for api.cdek.ru
 import json
 #import time
 import logging
-#import os
+import os.path
 #import sys
 from datetime import datetime, timedelta
+from pdf2image import convert_from_path
+from pdf2image import convert_from_bytes
 
 import log_app
 import requests
@@ -879,6 +881,22 @@ WHERE cdek_uuid = %s', (resp['entity']['uuid'], uuid))
                 #logging.error('resp=%s', resp)
                 #logging.error('err=%s', self.api.err_msg)
                 self.ret_msg = self.api.err_msg
+            else:
+                jpg_file, _ = os.path.splitext(filename)
+                jpg_path, _ = os.path.split(filename)
+                logging.debug('filename=%s, jpg_file=%s', filename, jpg_file)
+        pages = convert_from_path(filename, dpi=300, size=(1240,))
+        logging.debug('pages=%s', pages)
+        try:
+            pg0 = pages[0]
+        except IndexError:
+            self.ret_msg = 'convert from pdf failed, page[0] not found'
+            logging.error(self.ret_msg)
+        except BaseException:
+            raise
+        else:
+            pg0.save(f'{jpg_file}.jpg', dpi=(300,300))
+
         #return loc_res
         return resp
 
