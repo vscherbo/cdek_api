@@ -8,13 +8,15 @@ import logging
 import os.path
 #import sys
 from datetime import datetime, timedelta
-from pdf2image import convert_from_path
-from pdf2image import convert_from_bytes
 
 import log_app
 import requests
+from pdf2image import convert_from_path
 from pg_app import PGapp
 from psycopg2.extras import Json
+
+# from pdf2image import convert_from_bytes
+
 
 #import re
 
@@ -28,12 +30,22 @@ TS_FORMAT = '%Y%m%d_%H%M%S'
 FIRM_LAT = {'АРКОМ': 'ARCOM',
             'КИПСПБ': 'KIPSPB',
             'ЭТК': 'ETK',
+            'ТДЭС': 'TDES',
             'ЭТК24': 'ETK24',
             'ОСЗ': 'OSZ',
+            'Авт': 'Avt',
             'api': 'API'
            }
 
 dumps_utf8 = lambda x: json.dumps(x, ensure_ascii=False)
+
+def _err_msg(err_list):
+    """ Returns string with errors text """
+    msg_list = []
+    for err in err_list:
+        msg_list.append(err['message'])
+    ret_msg = '/'.join(msg_list)
+    return ret_msg
 
 class CdekAPI():
     """
@@ -185,9 +197,17 @@ class CdekAPI():
                 if resp is not None:
                     logging.debug('resp.__dict__=%s', resp.__dict__)
                     logging.debug('resp.text=%s', resp.text)
+                    resp_json = json.loads(resp.text)
+                    logging.debug('resp_json=%s', resp_json)
+                    logging.debug('type(resp_json)=%s', type(resp_json))
                     #ret = {}
-            #elif status_code not in (200, 202):  # if not, than HTTPError
-                self.err_msg = self._err_msg(resp.text.get('errors'))
+                #elif status_code not in (200, 202):  # if not, than HTTPError
+                    try:
+                        #self.err_msg = self._err_msg(resp.text.get('errors'))
+                        self.err_msg = self._err_msg(resp_json.get('errors'))
+                    except AttributeError:
+                        self.err_msg = resp.text
+
                 logging.error("cdek_req %s failed, self.status_code=%s",
                               method,
                               self.status_code)
@@ -197,14 +217,6 @@ class CdekAPI():
                 self.text = resp.text
 
         return ret
-
-    def _err_msg(self, err_list):
-        """ Returns string with errors text """
-        msg_list = []
-        for err in err_list:
-            msg_list.append(err['message'])
-        ret_msg = '/'.join(msg_list)
-        return ret_msg
 
     #def cdek_create_order(self, **kwargs):
     def cdek_create_order(self, payload):
@@ -271,87 +283,6 @@ class CdekAPI():
         return self.cdek_req(self._url_delivery_points, payload, 'GET')
 
 ##################################################################
-#
-#
-# comment M means "mandatory"
-DEMO_PAYLOAD = {
-    "type": 1,  # интернет-магазин
-    # "tariff_code": 482,  # для type:2 - 482: С-Д, 483: С-С
-    "tariff_code": 137,  # M для type:1 - 136: С-С, 137: С-Д, 138: Д-С, 139: Д-Д
-    "comment": "Новый заказ",
-    "number": 123,  # shp_id
-    # "shipment_point": "SPB9", заранее не указать, выбор водителя
-    "sender": {
-        "company": "Компания",
-        "name": "Петров Петр",  # M
-        "email": "msk@cdek.ru",
-        "phones": [  # M
-            {
-                "number": "+79134000101",
-                "additional": ""
-            }
-        ]
-    },
-    "recipient": {
-        "company": "Иванов Иван",
-        "name": "Иванов Иван",  # M
-        "passport_series": "5008",
-        "passport_number": "345123",
-        "passport_date_of_issue": "2019-03-12",
-        "passport_organization": "ОВД Москвы",
-        "tin": "123546789",
-        "email": "email@gmail.com",
-        "phones": [  # M
-            {
-                "number": "+79134000404"
-            }
-        ]
-    },
-    "from_location": {
-        "code": "137",
-        "address": "ул. Ясная, 11"  # M
-    },
-    "to_location": {
-        "code": "44",
-        "fias_guid": "0c5b2444-70a0-4932-980c-b4dc0d3f02b5",
-        "postal_code": "109004",
-        "longitude": 37.6204,
-        "latitude": 55.754,
-        "country_code": "RU",
-        "region": "Москва",
-        "sub_region": "Москва",
-        "city": "Москва",
-        "kladr_code": "7700000000000",
-        "address": "ул. Блюхера, 32"  # M
-    },
-    "print": 'barcode',
-    "packages": [
-        {
-            "number": "Коробка 1",  # M
-            "weight": "1000",  # M
-            #"length": 10,
-            #"width": 140,
-            #"height": 140,
-            "comment": "Комментарий к упаковке",
-            "items": {"name": 'Приборы',
-                      "ware_key": 123456789,
-"payment": {"value": 0},
-"cost": 1234.0,
-"weight": 200,
-"amount": 2
-                }
-        }
-    ]
-    }
-
-"""
-    "services": [
-        {
-            "code": "INSURANCE",
-            "parameter": "3000"
-        }
-    ],
-"""
 
 UPD_SENT_SQL = 'UPDATE shp.cdek_preorder_params \
 SET sts_code=%s, ret_code=%s, cdek_uuid=%s, ret_msg=%s WHERE shp_id = %s \
@@ -387,8 +318,6 @@ def verify_required(payload, mode='preorder'):
         payload['to_location'] = {"address": req_to[0]}
     payload['recipient']['name']
     payload['recipient']['phones'][0]['number']
-    payload['packages']
-    payload['packages']
     payload['packages']
     """
     err_params = []
@@ -570,7 +499,10 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
                 'email': req_recipient['email'],
                 'passport_series': req_recipient['passport_series'],
                 'passport_number': req_recipient['passport_number'],
-                'passport_date_of_issue': req_recipient['passport_date_of_issue'],
+                # right format of date "passport_date_of_issue": "2019-03-12",
+                # but currently format is wrong.
+                # Commented because is not mandatory attribute
+                ### 'passport_date_of_issue': req_recipient['passport_date_of_issue'],
                 'passport_organization': req_recipient['passport_organization'],
                 'inn': req_recipient['inn'],
                 'phones': {}
@@ -883,19 +815,17 @@ WHERE cdek_uuid = %s', (resp['entity']['uuid'], uuid))
                 self.ret_msg = self.api.err_msg
             else:
                 jpg_file, _ = os.path.splitext(filename)
-                jpg_path, _ = os.path.split(filename)
+                # jpg_path, _ = os.path.split(filename)
                 logging.debug('filename=%s, jpg_file=%s', filename, jpg_file)
-        pages = convert_from_path(filename, dpi=300, size=(1240,))
+        pages = convert_from_path(filename, dpi=300, size=(874, 1240))
         logging.debug('pages=%s', pages)
-        try:
-            pg0 = pages[0]
-        except IndexError:
-            self.ret_msg = 'convert from pdf failed, page[0] not found'
+        if len(pages) == 0:
+            self.ret_msg = 'convert from pdf failed, pages[] is empty'
             logging.error(self.ret_msg)
-        except BaseException:
-            raise
         else:
-            pg0.save(f'{jpg_file}.jpg', dpi=(300,300))
+            for count, page in enumerate(pages):
+                ind = count + 1
+                page.save(f'{jpg_file}_{ind}.jpg', dpi=(300, 300))
 
         #return loc_res
         return resp
@@ -983,15 +913,9 @@ if __name__ == '__main__':
         if ARGS.im_number:
             CDEK_RES = CDEK.api.im_order_im_number(ARGS.im_number)
 
-        # regions
-        #CDEK_RES = CDEK.cdek_regions(page=2, size=3)
-
-        # create demo order
-        #CDEK_RES = CDEK.api.cdek_create_order(payload=DEMO_PAYLOAD)
-
-        if ARGS.demoshp:
-            DEMO_PAYLOAD['number'] = ARGS.demoshp
-            CDEK_RES = CDEK.api.cdek_create_order(payload=DEMO_PAYLOAD)
+        #if ARGS.demoshp:
+        #    DEMO_PAYLOAD['number'] = ARGS.demoshp
+        #    CDEK_RES = CDEK.api.cdek_create_order(payload=DEMO_PAYLOAD)
 
         if ARGS.shp:
             CDEK_RES = CDEK.cdek_shp(ARGS.shp, ARGS.firm)
@@ -1039,6 +963,3 @@ if __name__ == '__main__':
             CDEK_RES = CDEK.test_packages(ARGS.pck, 'calc')
 
         logging.debug('CDEK_RES=%s', json.dumps(CDEK_RES, ensure_ascii=False, indent=4))
-
-
-        #logging.debug('CDEK.text=%s', CDEK.text)
