@@ -14,6 +14,7 @@ import requests
 from pdf2image import convert_from_path
 from pg_app import PGapp
 from psycopg2.extras import Json
+from transliterate import translit
 
 # from pdf2image import convert_from_bytes
 
@@ -211,7 +212,7 @@ class CdekAPI():
                 logging.error("cdek_req %s failed, self.status_code=%s",
                               method,
                               self.status_code)
-                logging.debug("cdek_req failed, self.err_msg=%s", self.err_msg)
+                logging.error("cdek_req failed, self.err_msg=%s", self.err_msg)
 
             if resp is not None:
                 self.text = resp.text
@@ -519,13 +520,14 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
         return ret_recipient
 
 
-
     def cdek_shp(self, shp_id, firm):
         """ Создаёт заказ для отправки с shp_id
         """
         payload = {}
         payload['type'] = 1  # интернет-магазин (ИМ)
-        payload['number'] = f'{shp_id}_{FIRM_LAT[firm]}'  # Номер заказа в ИС Клиента
+        #payload['number'] = f'{shp_id}_{FIRM_LAT[firm]}'  # Номер заказа в ИС Клиента
+        # Номер заказа в ИС Клиента
+        payload['number'] = f'{shp_id}_{translit(firm, "ru", reversed=True)}'
         payload['comment'] = self._comment(shp_id)
 
         # tarif
