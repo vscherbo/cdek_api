@@ -1,0 +1,82 @@
+##################################################################
+#
+#
+# comment M means "mandatory"
+DEMO_PAYLOAD = {
+    "type": 1,  # интернет-магазин
+    # "tariff_code": 482,  # для type:2 - 482: С-Д, 483: С-С
+    "tariff_code": 137,  # M для type:1 - 136: С-С, 137: С-Д, 138: Д-С, 139: Д-Д
+    "comment": "Новый заказ",
+    "number": 123,  # shp_id
+    # "shipment_point": "SPB9", заранее не указать, выбор водителя
+    "sender": {
+        "company": "Компания",
+        "name": "Петров Петр",  # M
+        "email": "msk@cdek.ru",
+        "phones": [  # M
+            {
+                "number": "+79134000101",
+                "additional": ""
+            }
+        ]
+    },
+    "recipient": {
+        "company": "Иванов Иван",
+        "name": "Иванов Иван",  # M
+        "passport_series": "5008",
+        "passport_number": "345123",
+        "passport_date_of_issue": "2019-03-12",
+        "passport_organization": "ОВД Москвы",
+        "tin": "123546789",
+        "email": "email@gmail.com",
+        "phones": [  # M
+            {
+                "number": "+79134000404"
+            }
+        ]
+    },
+    "from_location": {
+        "code": "137",
+        "address": "ул. Ясная, 11"  # M
+    },
+    "to_location": {
+        "code": "44",
+        "fias_guid": "0c5b2444-70a0-4932-980c-b4dc0d3f02b5",
+        "postal_code": "109004",
+        "longitude": 37.6204,
+        "latitude": 55.754,
+        "country_code": "RU",
+        "region": "Москва",
+        "sub_region": "Москва",
+        "city": "Москва",
+        "kladr_code": "7700000000000",
+        "address": "ул. Блюхера, 32"  # M
+    },
+    "print": 'barcode',
+    "packages": [
+        {
+            "number": "Коробка 1",  # M
+            "weight": "1000",  # M
+            #"length": 10,
+            #"width": 140,
+            #"height": 140,
+            "comment": "Комментарий к упаковке",
+            "items": {"name": 'Приборы',
+                      "ware_key": 123456789,
+"payment": {"value": 0},
+"cost": 1234.0,
+"weight": 200,
+"amount": 2
+                }
+        }
+    ]
+    }
+
+"""
+    "services": [
+        {
+            "code": "INSURANCE",
+            "parameter": "3000"
+        }
+    ],
+"""
