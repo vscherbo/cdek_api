@@ -31,7 +31,10 @@ WHERE
 cdek_number is not null
 AND barcode_uuid = arg_uuid;
 RAISE NOTICE 'shp.cdek_download_barcode: loc_firm=%, arg_uuid=%', loc_firm, arg_uuid;
-IF FOUND AND loc_firm is NOT NULL THEN
+IF NOT FOUND  THEN
+    err_str := format('Игнорируем загрузку ШК uuid=%s, т.к. был повторный запрос ШК.', arg_uuid);
+    RAISE NOTICE '%', err_str;
+ELSIF loc_firm is NOT NULL THEN
     cmd := format('%s/cdek_download_barcode.py --log_file=%s/cdek_download_barcode.log --conf=%s --uuid=%s --outpdf=%s', 
         wrk_dir, -- script dir
         format('%s/logs', wrk_dir), -- logfile dir
