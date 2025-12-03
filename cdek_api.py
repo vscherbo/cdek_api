@@ -460,7 +460,8 @@ VALUES (%s, %s, %s, %s)', (shp_id, ret_msg, json_payload, firm))
             # -- ret_from = {'code': 137} # Санкт-Петербург
             #payload['shipment_point'] = 'SPB9' # req_from[0]
             ret_from = {
-                    'city': "Санкт-Петербург",
+                    #'city': "Санкт-Петербург",
+                    'region': "Ленинградская область",
                     'address': req_from[0]}
             #        'address': "Мурино, Ясная 11"}
         elif tariff_code in (138, 139):  # from DVER`
@@ -849,10 +850,13 @@ WHERE cdek_uuid = %s', (resp['entity']['uuid'], uuid))
         self.ret_msg = None
         for req in info['requests']:
             logging.debug('req=%s', req)
-            if req['type'] == 'CREATE' and req['state'] == 'SUCCESSFUL':
+            if req['type'] == 'CREATE' and (req['state'] == 'SUCCESSFUL' or req['state'] == 'ACCEPTED'):
                 sts_code = 20
-                cdek_number = info["entity"]["cdek_number"]
-                our_number = info["entity"]["number"]
+                logging.debug('info=%s', json.dumps(info, ensure_ascii=False, indent=4))
+                # cdek_number = info["entity"]["cdek_number"]
+                # our_number = info["entity"]["number"]
+                cdek_number = info["entity"].get("cdek_number")
+                our_number = info["entity"].get("number")
             if req['type'] == 'CREATE' and req['state'] == 'INVALID':
                 sts_code = 91
                 msg_list = []
