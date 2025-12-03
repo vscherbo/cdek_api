@@ -1,5 +1,6 @@
 requests #==2.32.0
 psycopg2-binary
 pdf2image
+transliterate
 git+https://github.com/vscherbo/apps.git
 git+https://github.com/vscherbo/pg_app.git
