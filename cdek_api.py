@@ -177,11 +177,6 @@ class CdekAPI():
         except requests.exceptions.RequestException as exc:
             # catastrophic error. bail.
             self.err_msg = self.__exception_fmt__('RequestException', exc)
-        #else:
-        #    try:
-        #        ret = resp.json()
-        #    except requests.exceptions.JSONDecodeError:
-        #        ret = resp  # ??? .text
         finally:
             self.status_code = resp.status_code
             logging.debug("self.status_code=%s", self.status_code)
@@ -190,34 +185,36 @@ class CdekAPI():
             except requests.exceptions.JSONDecodeError:
                 ret = resp  # ??? .text
             if self.err_msg:
-                try:
-                    logging.error('err_msg=%s', self.err_msg)
-                except requests.exceptions.JSONDecodeError:
-                    logging.debug('err_msg is not JSON, resp=%s', resp)
-                #ret = {}
-                if resp is not None:
-                    logging.debug('resp.__dict__=%s', resp.__dict__)
-                    logging.debug('resp.text=%s', resp.text)
-                    resp_json = json.loads(resp.text)
-                    logging.debug('resp_json=%s', resp_json)
-                    logging.debug('type(resp_json)=%s', type(resp_json))
-                    #ret = {}
-                #elif status_code not in (200, 202):  # if not, than HTTPError
-                    try:
-                        #self.err_msg = self._err_msg(resp.text.get('errors'))
-                        self.err_msg = self._err_msg(resp_json.get('errors'))
-                    except AttributeError:
-                        self.err_msg = resp.text
-
-                logging.error("cdek_req %s failed, self.status_code=%s",
-                              method,
-                              self.status_code)
-                logging.error("cdek_req failed, self.err_msg=%s", self.err_msg)
+                self._err_handler(resp)
+                logging.error("cdek_req %s failed, self.status_code=%s, self.err_msg=%s",
+                              method, self.status_code, self.err_msg)
 
             if resp is not None:
                 self.text = resp.text
 
         return ret
+
+    def _err_handler(self, resp):
+        """ An error handler """
+        try:
+            logging.error('err_msg=%s', self.err_msg)
+        except requests.exceptions.JSONDecodeError:
+            logging.debug('err_msg is not JSON, resp=%s', resp)
+        #ret = {}
+        if resp is not None:
+            logging.debug('resp.__dict__=%s', resp.__dict__)
+            logging.debug('resp.text=%s', resp.text)
+            resp_json = json.loads(resp.text)
+            logging.debug('resp_json=%s', resp_json)
+            logging.debug('type(resp_json)=%s', type(resp_json))
+            #ret = {}
+        #elif status_code not in (200, 202):  # if not, than HTTPError
+            try:
+                #self.err_msg = self._err_msg(resp.text.get('errors'))
+                self.err_msg = self._err_msg(resp_json.get('errors'))
+            except AttributeError:
+                self.err_msg = resp.text
+
 
     #def cdek_create_order(self, **kwargs):
     def cdek_create_order(self, payload):
@@ -850,7 +847,8 @@ WHERE cdek_uuid = %s', (resp['entity']['uuid'], uuid))
         self.ret_msg = None
         for req in info['requests']:
             logging.debug('req=%s', req)
-            if req['type'] == 'CREATE' and (req['state'] == 'SUCCESSFUL' or req['state'] == 'ACCEPTED'):
+            if req['type'] == 'CREATE' and (req['state'] == 'SUCCESSFUL'
+                    or req['state'] == 'ACCEPTED'):
                 sts_code = 20
                 logging.debug('info=%s', json.dumps(info, ensure_ascii=False, indent=4))
                 # cdek_number = info["entity"]["cdek_number"]
