@@ -1,6 +1,5 @@
 #!/usr/bin/env python
-"""
-Base class for api.cdek.ru
+""" Base class for api.cdek.ru
 """
 import json
 #import time
@@ -10,20 +9,12 @@ import os.path
 from datetime import datetime, timedelta
 
 import log_app
+import psycopg2
 import requests
 from pdf2image import convert_from_path
 from pg_app import PGapp
 from psycopg2.extras import Json
 from transliterate import translit
-
-# from pdf2image import convert_from_bytes
-
-
-#import re
-
-
-#from psycopg2.extras import DictRow
-
 
 DT_FORMAT = '"%d.%m.%Y %H:%M:%S"'
 TS_FORMAT = '%Y%m%d_%H%M%S'
@@ -877,6 +868,35 @@ WHERE cdek_uuid = %s', (resp['entity']['uuid'], uuid))
                 logging.error('FAILED upd_sql=%s', upd_sql)
         return info
 
+    def cdek_webhook_repair(self, firm):
+        """ Repair from PG webhook subscription
+        """
+        # get webhooks list from CDEK (fact)
+        wh_list_cdek = self.api.cdek_webhook_list()
+
+        # get a list of webhooks from PG (goal)
+        self.curs = self.conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        wh_list_sql = self.curs.mogrify(
+                'SELECT wh_type, url FROM shp.cdek_wh WHERE our_firm = %s', (firm,))
+        # logging.debug('wh_list_sql=%s', wh_list_sql)
+        logging.debug('wh_list_sql=%s', str(wh_list_sql))
+        if self.do_query(wh_list_sql, reconnect=True):
+            wh_list = self.curs.fetchall()
+            for wh_pg in wh_list:
+                found = False
+                logging.info('checking PG url=%s, type=%s', wh_pg['url'], wh_pg['wh_type'])
+                for wh_fact in wh_list_cdek:
+                    logging.info('== compare FACT url=%s, type=%s', wh_fact['url'], wh_fact['type'])
+                    if wh_fact['type'] == wh_pg['wh_type'] and wh_fact['url'] == wh_pg['url']:
+                        found = True
+                        logging.info('FOUND url=%s, type=%s', wh_pg['url'], wh_pg['wh_type'])
+                        break
+                if not found:
+                    # repair
+                    logging.info('NOT found url=%s, type=%s', wh_pg['url'], wh_pg['wh_type'])
+                    # res = self.api.cdek_webhook_reg(wh_pg['url'], wh_pg['wh_type'])
+                    # logging.info('res=%s', json.dumps(res, ensure_ascii=False, indent=4))
+
 if __name__ == '__main__':
     log_app.PARSER.add_argument('--uuid', type=str, help='an order uuid to check status')
     log_app.PARSER.add_argument('--uuid_barcode', type=str, help=\
@@ -898,28 +918,28 @@ if __name__ == '__main__':
     log_app.PARSER.add_argument('--firm', type=str, help='our firm-sender')
 
     log_app.PARSER.add_argument('--calc', type=int, help='a shp_id to calculate a shipment cost')
-    log_app.PARSER.add_argument('--hooks', type=int, help='webhooks list')
+    log_app.PARSER.add_argument('--hooks', action='store_true', help='webhooks list')
     log_app.PARSER.add_argument('--wh_type', type=str, help='a webhook type to register')
+    log_app.PARSER.add_argument('--wh_reg', nargs=2, metavar=('wh_type', 'wh_url'),\
+            help='a webhook URL for TYPE registration')
+    log_app.PARSER.add_argument('--wh_repair', type=str, help='check and repair webhooks list')
     log_app.PARSER.add_argument('--city_code', type=str,
             help='List of delivery points in city_code')
     log_app.PARSER.add_argument('--pck', type=int)
+
     ARGS = log_app.PARSER.parse_args()
     CDEK = CDEKApp(args=ARGS)
+
     if CDEK:
         logging.debug('CDEK.text=%s', CDEK.api.text)
 
         # an order info
         if ARGS.uuid:
-            #CDEK_RES = CDEK.api.cdek_order_uuid(ARGS.uuid)
             CDEK_RES = CDEK.order_info(ARGS.uuid)
         if ARGS.cdek_number:
             CDEK_RES = CDEK.api.cdek_order_cdek_number(ARGS.cdek_number)
         if ARGS.im_number:
             CDEK_RES = CDEK.api.im_order_im_number(ARGS.im_number)
-
-        #if ARGS.demoshp:
-        #    DEMO_PAYLOAD['number'] = ARGS.demoshp
-        #    CDEK_RES = CDEK.api.cdek_create_order(payload=DEMO_PAYLOAD)
 
         if ARGS.shp:
             CDEK_RES = CDEK.cdek_shp(ARGS.shp, ARGS.firm)
@@ -960,10 +980,19 @@ if __name__ == '__main__':
             CDEK_RES = CDEK.api.cdek_webhook_reg('http://dru.kipspb.ru:8123', ARGS.wh_type)
             #CDEK_RES = CDEK.api.cdek_webhook_reg('http://ttk-az.kipspb.ru:8123', ARGS.wh_type)
 
+        if ARGS.wh_reg:  # our firm name
+            wh_type, wh_url = ARGS.wh_reg
+            CDEK_RES = CDEK.api.cdek_webhook_reg(wh_url, wh_type)
+
+        if ARGS.wh_repair:  # our firm name
+            CDEK.cdek_webhook_repair(ARGS.wh_repair)
+            CDEK_RES = None
+
         if ARGS.city_code:
             CDEK_RES = CDEK.delivery_points(ARGS.city_code)
 
         if ARGS.pck:
             CDEK_RES = CDEK.test_packages(ARGS.pck, 'calc')
 
-        logging.debug('CDEK_RES=%s', json.dumps(CDEK_RES, ensure_ascii=False, indent=4))
+        if CDEK_RES:
+            logging.debug('CDEK_RES=%s', json.dumps(CDEK_RES, ensure_ascii=False, indent=4))
