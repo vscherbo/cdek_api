@@ -893,9 +893,11 @@ WHERE cdek_uuid = %s', (resp['entity']['uuid'], uuid))
                         break
                 if not found:
                     # repair
-                    logging.info('NOT found url=%s, type=%s', wh_pg['url'], wh_pg['wh_type'])
-                    # res = self.api.cdek_webhook_reg(wh_pg['url'], wh_pg['wh_type'])
-                    # logging.info('res=%s', json.dumps(res, ensure_ascii=False, indent=4))
+                    logging.info('NOT found, repair: url=%s, type=%s',
+                            wh_pg['url'], wh_pg['wh_type'])
+                    res = self.api.cdek_webhook_reg(wh_pg['url'], wh_pg['wh_type'])
+                    # warning: for DEBUG only
+                    logging.warning('res=%s', json.dumps(res, ensure_ascii=False, indent=4))
 
 if __name__ == '__main__':
     log_app.PARSER.add_argument('--uuid', type=str, help='an order uuid to check status')
