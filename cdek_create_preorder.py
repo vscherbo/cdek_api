@@ -1,10 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """ Создание предзаказа СДЭК для shp_id
 """
 
 import logging
 import sys
-import json
 import cdek_api
 
 def main():
