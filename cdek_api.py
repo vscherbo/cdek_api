@@ -79,6 +79,10 @@ class CdekAPI():
             if self.auth(client_id, client_secret):
                 config['CDEK']['token'] = self.access_token
                 config['CDEK']['created'] = datetime.now().strftime(DT_FORMAT)
+                logging.info('auth completed, access_token=%s, dt_created=%s',
+                        self.access_token, config['CDEK']['created'])
+            else:
+                logging.warning('auth failed!')
         else:
             logging.info('Do NOT need login. Using saved access_token.')
             self.headers['Token'] = self.access_token
@@ -106,6 +110,7 @@ class CdekAPI():
             loc_res = True
         else:
             self.status_code = -1
+            logging.warning('failed. ret=%s', ret)
         return loc_res
 
     def need_login(self):
@@ -206,8 +211,6 @@ class CdekAPI():
             except AttributeError:
                 self.err_msg = resp.text
 
-
-    #def cdek_create_order(self, **kwargs):
     def cdek_create_order(self, payload):
         """ Create an order
         """
@@ -884,20 +887,29 @@ WHERE cdek_uuid = %s', (resp['entity']['uuid'], uuid))
             wh_list = self.curs.fetchall()
             for wh_pg in wh_list:
                 found = False
+                do_repair = True
                 logging.info('checking PG url=%s, type=%s', wh_pg['url'], wh_pg['wh_type'])
                 for wh_fact in wh_list_cdek:
-                    logging.info('== compare FACT url=%s, type=%s', wh_fact['url'], wh_fact['type'])
-                    if wh_fact['type'] == wh_pg['wh_type'] and wh_fact['url'] == wh_pg['url']:
-                        found = True
-                        logging.info('FOUND url=%s, type=%s', wh_pg['url'], wh_pg['wh_type'])
-                        break
+                    if 'url' in wh_fact:
+                        logging.info('== compare FACT url=%s, type=%s',
+                                wh_fact['url'], wh_fact['type'])
+                        if wh_fact['type'] == wh_pg['wh_type'] and wh_fact['url'] == wh_pg['url']:
+                            found = True
+                            logging.info('FOUND url=%s, type=%s', wh_pg['url'], wh_pg['wh_type'])
+                            break
+                    else:
+                        do_repair = False
+                        logging.warning('NO url in wh_fact(%s)', wh_fact)
                 if not found:
-                    # repair
-                    logging.info('NOT found, repair: url=%s, type=%s',
-                            wh_pg['url'], wh_pg['wh_type'])
-                    res = self.api.cdek_webhook_reg(wh_pg['url'], wh_pg['wh_type'])
-                    # warning: for DEBUG only
-                    logging.warning('res=%s', json.dumps(res, ensure_ascii=False, indent=4))
+                    if do_repair:  # got answer, but url is wrong. Need repair
+                        # repair
+                        logging.info('NOT found, repair: url=%s, type=%s',
+                                wh_pg['url'], wh_pg['wh_type'])
+                        res = self.api.cdek_webhook_reg(wh_pg['url'], wh_pg['wh_type'])
+                        # warning: for DEBUG only
+                        logging.warning('res=%s', json.dumps(res, ensure_ascii=False, indent=4))
+                    else:
+                        logging.warning('unexpected answer. skip repairing')
 
 if __name__ == '__main__':
     log_app.PARSER.add_argument('--uuid', type=str, help='an order uuid to check status')
@@ -952,23 +964,12 @@ if __name__ == '__main__':
 
         if ARGS.calc:
             CDEK_RES = CDEK.calc_tariff(ARGS.calc)
-            """
-            order_payload['delivery_recipient_cost'] = {
-                value: CDEK_RES["delivery_sum"],
-                vat_sum:
-                vat_rate:
-            }
-            """
-
         if ARGS.hooks:
             CDEK_RES = CDEK.api.cdek_webhook_list()
-
         if ARGS.req_barcode:
             CDEK_RES = CDEK.request_barcode(ARGS.req_barcode)
-
         if ARGS.uuid_barcode:
             CDEK_RES = CDEK.uuid_barcode(ARGS.uuid_barcode, prn_format='A4')
-
         if ARGS.cdek_num_barcode:
             CDEK_RES = CDEK.cdek_num_barcode(ARGS.cdek_num_barcode)
 
@@ -980,7 +981,6 @@ if __name__ == '__main__':
 
         if ARGS.wh_type:
             CDEK_RES = CDEK.api.cdek_webhook_reg('http://dru.kipspb.ru:8123', ARGS.wh_type)
-            #CDEK_RES = CDEK.api.cdek_webhook_reg('http://ttk-az.kipspb.ru:8123', ARGS.wh_type)
 
         if ARGS.wh_reg:  # our firm name
             wh_type, wh_url = ARGS.wh_reg
